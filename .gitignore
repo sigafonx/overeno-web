@@ -1,0 +1,30 @@
+# Added during production launch prep as a defensive measure — this
+# project has been built and shipped as a zip archive throughout (see
+# backend/README.md), so nothing here has ever depended on git. If this
+# repo is ever pushed to a real git remote as part of a production
+# deploy pipeline, this file stops the same categories of file that are
+# already excluded from the zip archive (secrets, generated database
+# files, dependencies) from accidentally being committed.
+
+# Secrets — never commit real env values
+.env
+.env.*
+!.env.example
+
+# Dependencies — reinstalled via npm install, never committed
+node_modules/
+
+# SQLite — the live database and its WAL/SHM journal files are runtime
+# data, not source; back them up with `npm run backup:sqlite`
+# (backend/README.md), never commit them
+backend/data/*.sqlite
+backend/data/*.sqlite-wal
+backend/data/*.sqlite-shm
+
+# SQLite backups — operational artifacts, not source; each one may
+# contain real customer/business data
+backend/backups/
+
+# OS/editor noise
+.DS_Store
+*.log

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEXIUM — Admin: Dealeři</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/admin.css">
+</head>
+<body class="admin-body">
+
+<header class="admin-header">
+  <div class="admin-header-inner">
+    <div class="admin-brand-block">
+      <div class="admin-brand">NEXIUM <span class="admin-brand-sub">· Admin · Dealeři</span></div>
+      <nav class="admin-nav">
+        <a href="admin-leads.html">Leady</a>
+        <a href="admin-bookings.html">Objednávky</a>
+        <a href="admin-vin-checks.html">VIN kontroly</a>
+        <a href="admin-email-logs.html">Email logy</a>
+        <a href="admin-payments.html">Platby</a>
+        <a href="admin-agents.html">Agenti</a>
+        <a href="admin-reports.html">Reporty</a>
+        <a href="admin-ai-runs.html">AI runs</a>
+        <a href="admin-agent-tasks.html">Agent tasks</a>
+        <a href="admin-inspectors.html">Technici</a>
+        <a href="admin-inspection-jobs.html">Osmotra</a>
+        <a href="admin-dealers.html" class="active">Dealeři</a>
+        <a href="admin-badges.html">Badges</a>
+        <a href="admin-revenue-share.html">Revenue share</a>
+      </nav>
+    </div>
+    <div class="admin-auth">
+      <input type="password" id="adminPasswordInput" placeholder="Admin heslo" autocomplete="current-password">
+      <button type="button" class="btn btn-brass btn-sm" id="loadBtn">Načíst dealery</button>
+      <span class="admin-auth-note" id="authNote"></span>
+    </div>
+  </div>
+</header>
+
+<main class="admin-main">
+  <div class="demo-warning">
+    Dealer status ovlivňuje, jestli mohou jeho vozidla žádat o badge —
+    žádost o badge jde jen pro dealera se stavem „verified" a schválit ji
+    může jen admin (viz <a href="admin-badges.html">Badges</a>
+        <a href="admin-revenue-share.html">Revenue share</a>). Žádné
+    přihlášení dealera, žádný veřejný profil — tohle je čistě admin
+    rozhraní.
+  </div>
+
+  <div class="admin-toolbar">
+    <div class="admin-filters">
+      <select id="filterStatus">
+        <option value="">Vše — stav</option>
+        <option value="pending">pending</option>
+        <option value="verified">verified</option>
+        <option value="rejected">rejected</option>
+        <option value="suspended">suspended</option>
+      </select>
+      <input type="search" id="filterSearch" placeholder="Hledat firmu, kontakt, email, město…">
+    </div>
+    <div class="admin-actions">
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="refreshBtn">Obnovit</button>
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="exportBtn">Export CSV</button>
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="fromLeadBtn">+ Z dealer_request leadu</button>
+      <button type="button" class="btn btn-brass btn-sm" id="createBtn">+ Nový dealer</button>
+    </div>
+  </div>
+
+  <p class="admin-status" id="listStatus">Zadejte admin heslo a klikněte na „Načíst dealery".</p>
+
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Firma</th>
+          <th>Kontakt</th>
+          <th>Město</th>
+          <th>Stav</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="dealersTbody"></tbody>
+    </table>
+  </div>
+
+  <p class="admin-empty" id="emptyState" style="display:none;">Žádní dealeři neodpovídají filtru.</p>
+</main>
+
+<!-- From-lead picker -->
+<div class="modal-overlay" id="fromLeadOverlay">
+  <div class="modal-box" style="max-width:520px;">
+    <button class="modal-close" id="fromLeadClose" aria-label="Zavřít">&times;</button>
+    <h3>Vytvořit dealera z leadu</h3>
+    <p style="font-size:0.85rem;color:var(--text-muted-dark);margin:0 0 12px;">
+      Nezmění se tím původní lead — jen se z něj zkopírují údaje do
+      nového dealer profilu.
+    </p>
+    <div id="fromLeadList"></div>
+    <p class="form-status" id="fromLeadMsg"></p>
+  </div>
+</div>
+
+<!-- Create/detail modal -->
+<div class="modal-overlay" id="detailOverlay">
+  <div class="modal-box" style="max-width:640px;">
+    <button class="modal-close" id="detailClose" aria-label="Zavřít">&times;</button>
+    <h3 id="detailTitle">Nový dealer</h3>
+
+    <div class="admin-tabs" id="detailTabs" style="display:none;">
+      <button type="button" class="admin-tab-btn active" data-tab="summary">Summary</button>
+      <button type="button" class="admin-tab-btn" data-tab="vehicles">Vozidla</button>
+    </div>
+
+    <div class="admin-tab-panel active" data-tab-panel="summary">
+      <div class="modal-field">
+        <label for="detailCompanyName">Firma *</label>
+        <input type="text" id="detailCompanyName" maxlength="200">
+      </div>
+      <div class="modal-field">
+        <label for="detailContactName">Kontaktní osoba</label>
+        <input type="text" id="detailContactName" maxlength="200">
+      </div>
+      <div class="modal-field">
+        <label for="detailEmail">Email</label>
+        <input type="email" id="detailEmail" maxlength="200">
+      </div>
+      <div class="modal-field">
+        <label for="detailPhone">Telefon</label>
+        <input type="text" id="detailPhone" maxlength="50">
+      </div>
+      <div class="modal-field">
+        <label for="detailCity">Město</label>
+        <input type="text" id="detailCity" maxlength="100">
+      </div>
+      <div class="modal-field">
+        <label for="detailWebsite">Web</label>
+        <input type="text" id="detailWebsite" maxlength="300">
+      </div>
+      <div class="modal-field" id="detailStatusFieldWrap" style="display:none;">
+        <label for="detailStatusSelect">Stav</label>
+        <select id="detailStatusSelect">
+          <option value="pending">pending</option>
+          <option value="verified">verified</option>
+          <option value="rejected">rejected</option>
+          <option value="suspended">suspended</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label for="detailInternalNote">Interní poznámka</label>
+        <textarea id="detailInternalNote" rows="3" maxlength="3000"></textarea>
+      </div>
+      <p class="form-status" id="detailStatusMsg"></p>
+      <button type="button" class="btn btn-brass" id="detailSaveBtn">Uložit</button>
+    </div>
+
+    <div class="admin-tab-panel" data-tab-panel="vehicles">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <p style="margin:0;font-size:0.85rem;color:var(--text-muted-dark);">Vozidla tohoto dealera.</p>
+        <button type="button" class="btn btn-ghost on-paper btn-sm" id="addVehicleBtn">+ Přidat vozidlo</button>
+      </div>
+      <div id="addVehicleForm" style="display:none;margin-bottom:14px;padding:10px 12px;border:1px solid rgba(27,33,41,0.1);border-radius:4px;background:var(--paper-2);">
+        <div class="modal-field" style="margin-bottom:8px;">
+          <label for="newVehicleVin">VIN</label>
+          <input type="text" id="newVehicleVin" maxlength="17">
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <input type="text" id="newVehicleMake" placeholder="Značka" style="flex:1;min-width:100px;">
+          <input type="text" id="newVehicleModel" placeholder="Model" style="flex:1;min-width:100px;">
+          <input type="number" id="newVehicleYear" placeholder="Rok" style="width:90px;">
+        </div>
+        <div class="modal-field" style="margin:8px 0;">
+          <label for="newVehicleListingUrl">Odkaz na inzerát</label>
+          <input type="text" id="newVehicleListingUrl">
+        </div>
+        <button type="button" class="btn btn-brass btn-sm" id="saveVehicleBtn">Uložit vozidlo</button>
+        <p class="form-status" id="addVehicleMsg"></p>
+      </div>
+      <div id="vehiclesList"></div>
+    </div>
+
+    <button type="button" class="btn btn-ghost on-paper btn-block" id="detailCloseBtn2" style="margin-top:18px;">Zavřít</button>
+  </div>
+</div>
+
+<script src="js/config.js"></script>
+<script type="module" src="js/admin/admin-dealers.js"></script>
+</body>
+</html>

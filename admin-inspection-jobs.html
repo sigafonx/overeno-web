@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEXIUM — Admin: Osmotra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/admin.css">
+</head>
+<body class="admin-body">
+
+<header class="admin-header">
+  <div class="admin-header-inner">
+    <div class="admin-brand-block">
+      <div class="admin-brand">NEXIUM <span class="admin-brand-sub">· Admin · Osmotra</span></div>
+      <nav class="admin-nav">
+        <a href="admin-leads.html">Leady</a>
+        <a href="admin-bookings.html">Objednávky</a>
+        <a href="admin-vin-checks.html">VIN kontroly</a>
+        <a href="admin-email-logs.html">Email logy</a>
+        <a href="admin-payments.html">Platby</a>
+        <a href="admin-agents.html">Agenti</a>
+        <a href="admin-reports.html">Reporty</a>
+        <a href="admin-ai-runs.html">AI runs</a>
+        <a href="admin-agent-tasks.html">Agent tasks</a>
+        <a href="admin-inspectors.html">Technici</a>
+        <a href="admin-inspection-jobs.html" class="active">Osmotra</a>
+        <a href="admin-dealers.html">Dealeři</a>
+        <a href="admin-badges.html">Badges</a>
+        <a href="admin-revenue-share.html">Revenue share</a>
+      </nav>
+    </div>
+    <div class="admin-auth">
+      <input type="password" id="adminPasswordInput" placeholder="Admin heslo" autocomplete="current-password">
+      <button type="button" class="btn btn-brass btn-sm" id="loadBtn">Načíst osmotra</button>
+      <span class="admin-auth-note" id="authNote"></span>
+    </div>
+  </div>
+</header>
+
+<main class="admin-main">
+  <div class="demo-warning">
+    Admin-managed workflow — žádný login pro techniky, žádné automatické
+    výplaty. Osmotra vznikají tlačítkem „Create inspection job" na
+    zaplacené objednávce (<a href="admin-bookings.html">Objednávky</a>),
+    dál se spravují výhradně tady.
+  </div>
+
+  <div class="admin-toolbar">
+    <div class="admin-filters">
+      <select id="filterStatus">
+        <option value="">Vše — stav</option>
+        <option value="created">created</option>
+        <option value="assigned">assigned</option>
+        <option value="scheduled">scheduled</option>
+        <option value="in_progress">in_progress</option>
+        <option value="checklist_done">checklist_done</option>
+        <option value="admin_review">admin_review</option>
+        <option value="completed">completed</option>
+        <option value="cancelled">cancelled</option>
+      </select>
+      <input type="search" id="filterSearch" placeholder="Hledat ID, booking, lokaci…">
+    </div>
+    <div class="admin-actions">
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="refreshBtn">Obnovit</button>
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="exportBtn">Export CSV</button>
+    </div>
+  </div>
+
+  <p class="admin-status" id="listStatus">Zadejte admin heslo a klikněte na „Načíst osmotra".</p>
+
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Vytvořeno</th>
+          <th>Booking</th>
+          <th>Technik</th>
+          <th>Lokace</th>
+          <th>Termín</th>
+          <th>Stav</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="jobsTbody"></tbody>
+    </table>
+  </div>
+
+  <p class="admin-empty" id="emptyState" style="display:none;">Žádná osmotra neodpovídají filtru.</p>
+</main>
+
+<!-- Detail -->
+<div class="modal-overlay" id="detailOverlay">
+  <div class="modal-box" style="max-width:620px;">
+    <button class="modal-close" id="detailClose" aria-label="Zavřít">&times;</button>
+    <h3>Detail osmotra</h3>
+
+    <div class="admin-tabs">
+      <button type="button" class="admin-tab-btn active" data-tab="summary">Summary</button>
+      <button type="button" class="admin-tab-btn" data-tab="checklist">Checklist</button>
+    </div>
+
+    <div class="admin-tab-panel active" data-tab-panel="summary">
+      <dl class="detail-fields" id="detailFields"></dl>
+
+      <div class="modal-field">
+        <label for="detailStatusSelect">Stav</label>
+        <select id="detailStatusSelect">
+          <option value="created">created</option>
+          <option value="assigned">assigned</option>
+          <option value="scheduled">scheduled</option>
+          <option value="in_progress">in_progress</option>
+          <option value="checklist_done">checklist_done</option>
+          <option value="admin_review">admin_review</option>
+          <option value="completed">completed</option>
+          <option value="cancelled">cancelled</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label for="detailInspectorSelect">Přiřazený technik</label>
+        <select id="detailInspectorSelect"><option value="">— Nepřiřazeno —</option></select>
+      </div>
+      <div class="modal-field">
+        <label for="detailScheduledAt">Termín (datum a čas)</label>
+        <input type="datetime-local" id="detailScheduledAt">
+      </div>
+      <div class="modal-field">
+        <label for="detailLocation">Lokace</label>
+        <input type="text" id="detailLocation" maxlength="300">
+      </div>
+      <div class="modal-field">
+        <label for="detailCustomerContact">Kontakt na zákazníka</label>
+        <input type="text" id="detailCustomerContact" maxlength="300">
+      </div>
+      <div class="modal-field">
+        <label for="detailInternalNote">Interní poznámka</label>
+        <textarea id="detailInternalNote" rows="3" maxlength="3000"></textarea>
+      </div>
+      <p class="form-status" id="detailSummaryMsg"></p>
+      <button type="button" class="btn btn-brass" id="detailSaveBtn">Uložit</button>
+    </div>
+
+    <div class="admin-tab-panel" data-tab-panel="checklist">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <p style="margin:0;font-size:0.85rem;color:var(--text-muted-dark);">
+          Výchozí checklist se vytvoří jedním kliknutím — položky pak
+          technik/admin vyplní ručně (ok / issue / not checked + komentář).
+        </p>
+        <button type="button" class="btn btn-ghost on-paper btn-sm" id="createDefaultsBtn">Vytvořit výchozí checklist</button>
+      </div>
+      <p class="form-status" id="checklistMsg"></p>
+      <div id="checklistList"></div>
+    </div>
+
+    <button type="button" class="btn btn-ghost on-paper btn-block" id="detailCloseBtn2" style="margin-top:18px;">Zavřít</button>
+  </div>
+</div>
+
+<script src="js/config.js"></script>
+<script type="module" src="js/admin/admin-inspection-jobs.js"></script>
+</body>
+</html>

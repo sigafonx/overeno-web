@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEXIUM — Admin: Agenti</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/admin.css">
+</head>
+<body class="admin-body">
+
+<header class="admin-header">
+  <div class="admin-header-inner">
+    <div class="admin-brand-block">
+      <div class="admin-brand">NEXIUM <span class="admin-brand-sub">· Admin · Agenti</span></div>
+      <nav class="admin-nav">
+        <a href="admin-leads.html">Leady</a>
+        <a href="admin-bookings.html">Objednávky</a>
+        <a href="admin-vin-checks.html">VIN kontroly</a>
+        <a href="admin-email-logs.html">Email logy</a>
+        <a href="admin-payments.html">Platby</a>
+        <a href="admin-agents.html" class="active">Agenti</a>
+        <a href="admin-reports.html">Reporty</a>
+        <a href="admin-ai-runs.html">AI runs</a>
+        <a href="admin-agent-tasks.html">Agent tasks</a>
+        <a href="admin-inspectors.html">Technici</a>
+        <a href="admin-inspection-jobs.html">Osmotra</a>
+        <a href="admin-dealers.html">Dealeři</a>
+        <a href="admin-badges.html">Badges</a>
+        <a href="admin-revenue-share.html">Revenue share</a>
+      </nav>
+    </div>
+    <div class="admin-auth">
+      <input type="password" id="adminPasswordInput" placeholder="Admin heslo" autocomplete="current-password">
+      <button type="button" class="btn btn-brass btn-sm" id="loadBtn">Načíst agenty</button>
+      <span class="admin-auth-note" id="authNote"></span>
+    </div>
+  </div>
+</header>
+
+<main class="admin-main">
+  <div class="demo-warning">
+    Agenti jsou interní pracovní role (Sales / Booking Coordinator / VIN Analyst /
+    Payment Admin / Admin Supervisor), kterým lze přiřadit leady, objednávky,
+    VIN kontroly a platby. Pořád se přihlašuje stejným <code>ADMIN_PASSWORD</code> —
+    tohle není plnohodnotný multi-user login systém, jen evidence + přiřazování.
+  </div>
+
+  <!-- New agent -->
+  <div class="admin-table-wrap" style="padding:16px 18px;margin-bottom:20px;">
+    <h3 style="margin:0 0 12px;font-size:1rem;">Nový agent</h3>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+      <div class="modal-field" style="margin-bottom:0;min-width:160px;">
+        <label for="newAgentName">Jméno</label>
+        <input type="text" id="newAgentName" placeholder="Jana Nováková">
+      </div>
+      <div class="modal-field" style="margin-bottom:0;min-width:180px;">
+        <label for="newAgentRole">Role</label>
+        <select id="newAgentRole">
+          <option value="sales_agent">sales_agent</option>
+          <option value="booking_coordinator">booking_coordinator</option>
+          <option value="vin_analyst">vin_analyst</option>
+          <option value="payment_admin">payment_admin</option>
+          <option value="admin_supervisor">admin_supervisor</option>
+        </select>
+      </div>
+      <div class="modal-field" style="margin-bottom:0;min-width:200px;">
+        <label for="newAgentEmail">E-mail (nepovinné)</label>
+        <input type="email" id="newAgentEmail" placeholder="jana@overeno.cz">
+      </div>
+      <button type="button" class="btn btn-brass" id="createAgentBtn">Vytvořit agenta</button>
+    </div>
+    <p class="form-status" id="createAgentStatus"></p>
+  </div>
+
+  <div class="admin-toolbar">
+    <div class="admin-filters">
+      <select id="filterRole">
+        <option value="">Vše — role</option>
+        <option value="sales_agent">sales_agent</option>
+        <option value="booking_coordinator">booking_coordinator</option>
+        <option value="vin_analyst">vin_analyst</option>
+        <option value="payment_admin">payment_admin</option>
+        <option value="admin_supervisor">admin_supervisor</option>
+      </select>
+      <select id="filterActive">
+        <option value="">Vše — stav</option>
+        <option value="true">active</option>
+        <option value="false">inactive</option>
+      </select>
+      <input type="search" id="filterSearch" placeholder="Hledat jméno, e-mail…">
+    </div>
+    <div class="admin-actions">
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="refreshBtn">Obnovit</button>
+    </div>
+  </div>
+
+  <p class="admin-status" id="listStatus">Zadejte admin heslo a klikněte na „Načíst agenty“.</p>
+
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Jméno</th>
+          <th>Role</th>
+          <th>E-mail</th>
+          <th>Stav</th>
+          <th>Vytvořen</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="agentsTbody"></tbody>
+    </table>
+  </div>
+
+  <p class="admin-empty" id="emptyState" style="display:none;">Žádní agenti neodpovídají filtru.</p>
+</main>
+
+<!-- Agent detail / edit -->
+<div class="modal-overlay" id="detailOverlay">
+  <div class="modal-box" style="max-width:480px;">
+    <button class="modal-close" id="detailClose" aria-label="Zavřít">&times;</button>
+    <h3>Detail agenta</h3>
+
+    <div class="modal-field">
+      <label for="detailName">Jméno</label>
+      <input type="text" id="detailName">
+    </div>
+    <div class="modal-field">
+      <label for="detailRole">Role</label>
+      <select id="detailRole">
+        <option value="sales_agent">sales_agent</option>
+        <option value="booking_coordinator">booking_coordinator</option>
+        <option value="vin_analyst">vin_analyst</option>
+        <option value="payment_admin">payment_admin</option>
+        <option value="admin_supervisor">admin_supervisor</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label for="detailEmail">E-mail</label>
+      <input type="email" id="detailEmail">
+    </div>
+    <div class="modal-field">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+        <input type="checkbox" id="detailActive"> Active (odškrtnutím = soft deactivate, žádné DELETE)
+      </label>
+    </div>
+
+    <p class="form-status" id="detailStatusMsg"></p>
+    <button type="button" class="btn btn-brass" id="detailSave">Uložit</button>
+    <button type="button" class="btn btn-ghost on-paper btn-block" id="detailCloseBtn2" style="margin-top:14px;">Zavřít</button>
+  </div>
+</div>
+
+<script src="js/config.js"></script>
+<script type="module" src="js/admin/admin-agents.js"></script>
+</body>
+</html>

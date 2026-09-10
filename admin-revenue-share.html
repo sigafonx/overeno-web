@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEXIUM — Admin: Revenue share</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/admin.css">
+</head>
+<body class="admin-body">
+
+<header class="admin-header">
+  <div class="admin-header-inner">
+    <div class="admin-brand-block">
+      <div class="admin-brand">NEXIUM <span class="admin-brand-sub">· Admin · Revenue share</span></div>
+      <nav class="admin-nav">
+        <a href="admin-leads.html">Leady</a>
+        <a href="admin-bookings.html">Objednávky</a>
+        <a href="admin-vin-checks.html">VIN kontroly</a>
+        <a href="admin-email-logs.html">Email logy</a>
+        <a href="admin-payments.html">Platby</a>
+        <a href="admin-agents.html">Agenti</a>
+        <a href="admin-reports.html">Reporty</a>
+        <a href="admin-ai-runs.html">AI runs</a>
+        <a href="admin-agent-tasks.html">Agent tasks</a>
+        <a href="admin-inspectors.html">Technici</a>
+        <a href="admin-inspection-jobs.html">Osmotra</a>
+        <a href="admin-dealers.html">Dealeři</a>
+        <a href="admin-badges.html">Badges</a>
+        <a href="admin-revenue-share.html" class="active">Revenue share</a>
+      </nav>
+    </div>
+    <div class="admin-auth">
+      <input type="password" id="adminPasswordInput" placeholder="Admin heslo" autocomplete="current-password">
+      <button type="button" class="btn btn-brass btn-sm" id="loadBtn">Načíst</button>
+      <span class="admin-auth-note" id="authNote"></span>
+    </div>
+  </div>
+</header>
+
+<main class="admin-main">
+  <div class="demo-warning">
+    <strong>Revenue-share is transparent and visible to admin. No automatic hidden transfers are performed.</strong>
+    Tenhle systém nikdy sám neposílá peníze — jen počítá a zaznamenává.
+    Skutečný převod (Wise nebo jinak) dělá vždy ručně člověk, mimo tenhle
+    systém, a pak ho tady ručně označí jako „paid".
+  </div>
+
+  <div class="admin-tabs">
+    <button type="button" class="admin-tab-btn active" data-tab="settings">Settings</button>
+    <button type="button" class="admin-tab-btn" data-tab="ledger">Ledger</button>
+    <button type="button" class="admin-tab-btn" data-tab="payouts">Payouts</button>
+  </div>
+
+  <div class="admin-tab-panel active" data-tab-panel="settings">
+    <div class="admin-table-wrap" style="padding:16px 18px;">
+      <div class="modal-field">
+        <label><input type="checkbox" id="settingsEnabled"> Revenue-share enabled</label>
+      </div>
+      <div class="modal-field">
+        <label for="settingsSharePercent">Share percent (0–100)</label>
+        <input type="number" id="settingsSharePercent" min="0" max="100">
+      </div>
+      <div class="modal-field">
+        <label for="settingsTimezone">Timezone (IANA, např. Europe/Prague)</label>
+        <input type="text" id="settingsTimezone">
+      </div>
+      <div class="modal-field">
+        <label for="settingsPayoutDay">Payout day (1–28)</label>
+        <input type="number" id="settingsPayoutDay" min="1" max="28">
+      </div>
+      <div class="modal-field">
+        <label for="settingsPayoutTime">Payout time (HH:mm)</label>
+        <input type="text" id="settingsPayoutTime" placeholder="10:00">
+      </div>
+      <div class="modal-field">
+        <label for="settingsPayoutMethod">Payout method</label>
+        <input type="text" id="settingsPayoutMethod" placeholder="wise">
+      </div>
+      <div class="modal-field">
+        <label for="settingsPayoutRecipientLabel">Payout recipient — label</label>
+        <input type="text" id="settingsPayoutRecipientLabel" placeholder="Jméno / firma příjemce">
+      </div>
+      <div class="modal-field">
+        <label for="settingsPayoutRecipientMasked">Payout recipient — masked value</label>
+        <input type="text" id="settingsPayoutRecipientMasked" placeholder="Wise ****1234 (NIKDY celé číslo karty/účtu)">
+      </div>
+      <div class="modal-field">
+        <label for="settingsNotes">Notes</label>
+        <textarea id="settingsNotes" rows="3"></textarea>
+      </div>
+      <p class="form-status" id="settingsMsg"></p>
+      <button type="button" class="btn btn-brass" id="settingsSaveBtn">Uložit settings</button>
+    </div>
+  </div>
+
+  <div class="admin-tab-panel" data-tab-panel="ledger">
+    <div class="admin-toolbar">
+      <div class="admin-filters">
+        <select id="ledgerFilterStatus">
+          <option value="">Vše — stav</option>
+          <option value="accrued">accrued</option>
+          <option value="excluded">excluded</option>
+          <option value="included_in_payout">included_in_payout</option>
+          <option value="reversed">reversed</option>
+        </select>
+        <input type="text" id="ledgerFilterMonth" placeholder="monthKey, např. 2026-09">
+      </div>
+      <div class="admin-actions">
+        <button type="button" class="btn btn-ghost on-paper btn-sm" id="ledgerRefreshBtn">Obnovit</button>
+        <button type="button" class="btn btn-ghost on-paper btn-sm" id="ledgerExportBtn">Export CSV</button>
+      </div>
+    </div>
+    <p class="admin-status" id="ledgerStatus"></p>
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr><th>Datum</th><th>Payment ID</th><th>Amount</th><th>Share</th><th>MonthKey</th><th>Stav</th></tr>
+        </thead>
+        <tbody id="ledgerTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="admin-tab-panel" data-tab-panel="payouts">
+    <div class="admin-toolbar">
+      <div class="admin-filters">
+        <input type="text" id="calcMonthKey" placeholder="2026-09" style="max-width:140px;">
+        <button type="button" class="btn btn-brass btn-sm" id="calculateBtn">Calculate payout for month</button>
+      </div>
+      <div class="admin-actions">
+        <button type="button" class="btn btn-ghost on-paper btn-sm" id="payoutsRefreshBtn">Obnovit</button>
+        <button type="button" class="btn btn-ghost on-paper btn-sm" id="payoutsExportBtn">Export CSV</button>
+      </div>
+    </div>
+    <p class="admin-status" id="payoutsStatus"></p>
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr><th>MonthKey</th><th>Gross</th><th>Share</th><th>Due</th><th>Recipient</th><th>Stav</th><th></th></tr>
+        </thead>
+        <tbody id="payoutsTbody"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<!-- Payout detail -->
+<div class="modal-overlay" id="detailOverlay">
+  <div class="modal-box" style="max-width:520px;">
+    <button class="modal-close" id="detailClose" aria-label="Zavřít">&times;</button>
+    <h3>Detail payoutu</h3>
+    <dl class="detail-fields" id="detailFields"></dl>
+    <div class="modal-field">
+      <label for="detailInternalNote">Interní poznámka</label>
+      <textarea id="detailInternalNote" rows="3"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="saveNoteBtn">Uložit poznámku</button>
+      <button type="button" class="btn btn-brass btn-sm" id="markPaidBtn">Mark as paid</button>
+    </div>
+    <p class="form-status" id="detailMsg"></p>
+    <button type="button" class="btn btn-ghost on-paper btn-block" id="detailCloseBtn2" style="margin-top:18px;">Zavřít</button>
+  </div>
+</div>
+
+<script src="js/config.js"></script>
+<script type="module" src="js/admin/admin-revenue-share.js"></script>
+</body>
+</html>

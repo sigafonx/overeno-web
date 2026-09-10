@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEXIUM — Platba zrušena</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<style>
+  body.payment-page{
+    min-height:100vh;margin:0;display:flex;align-items:center;justify-content:center;
+    background:var(--ink);padding:24px;
+  }
+  .payment-card{
+    max-width:480px;width:100%;text-align:center;background:var(--ink-2);
+    border:1px solid rgba(201,154,59,0.25);border-radius:var(--radius);padding:44px 32px;
+  }
+  .payment-card .brand{justify-content:center;margin-bottom:22px;}
+  .payment-icon{
+    width:56px;height:56px;border-radius:50%;background:rgba(180,69,58,0.16);
+    display:flex;align-items:center;justify-content:center;margin:0 auto 20px;
+  }
+  .payment-card h1{font-family:var(--font-display);color:var(--text-light);font-size:1.5rem;margin:0 0 14px;}
+  .payment-card p{color:var(--text-muted-light);font-size:0.95rem;line-height:1.6;margin:0 0 10px;}
+  .payment-meta{
+    font-family:var(--font-mono);font-size:0.78rem;color:var(--text-muted-light);
+    background:rgba(255,255,255,0.04);border-radius:6px;padding:10px 12px;margin:18px 0;
+    word-break:break-all;display:none;
+  }
+  .payment-card .btn{margin-top:14px;}
+</style>
+</head>
+<body class="payment-page">
+
+<div class="payment-card">
+  <div class="brand">NEXIUM<span class="brand-dot">•</span></div>
+  <div class="payment-icon">
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#B4453A" stroke-width="3"><path d="M6 6l12 12M18 6L6 18"/></svg>
+  </div>
+  <h1>Platba byla zrušena</h1>
+  <p>Nic vám nebylo naúčtováno. Objednávka ani rezervace nebyla potvrzena.</p>
+  <p>Pokud jste to nezamýšleli, můžete to kdykoliv zkusit znovu z hlavní stránky.</p>
+
+  <div class="payment-meta" id="paymentMeta"></div>
+
+  <a href="index.html" class="btn btn-brass">Zpět na hlavní stránku</a>
+</div>
+
+<script>
+  // Same purely-cosmetic query param read as payment-success.html — no
+  // backend calls from this page.
+  const params = new URLSearchParams(window.location.search);
+  const paymentId = params.get('payment_id');
+
+  if (paymentId) {
+    const metaEl = document.getElementById('paymentMeta');
+    metaEl.textContent = 'Payment ID: ' + paymentId;
+    metaEl.style.display = 'block';
+  }
+</script>
+</body>
+</html>

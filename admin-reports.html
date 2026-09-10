@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEXIUM — Admin: Reporty</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/admin.css">
+</head>
+<body class="admin-body">
+
+<header class="admin-header">
+  <div class="admin-header-inner">
+    <div class="admin-brand-block">
+      <div class="admin-brand">NEXIUM <span class="admin-brand-sub">· Admin · Reporty</span></div>
+      <nav class="admin-nav">
+        <a href="admin-leads.html">Leady</a>
+        <a href="admin-bookings.html">Objednávky</a>
+        <a href="admin-vin-checks.html">VIN kontroly</a>
+        <a href="admin-email-logs.html">Email logy</a>
+        <a href="admin-payments.html">Platby</a>
+        <a href="admin-agents.html">Agenti</a>
+        <a href="admin-reports.html" class="active">Reporty</a>
+        <a href="admin-ai-runs.html">AI runs</a>
+        <a href="admin-agent-tasks.html">Agent tasks</a>
+        <a href="admin-inspectors.html">Technici</a>
+        <a href="admin-inspection-jobs.html">Osmotra</a>
+        <a href="admin-dealers.html">Dealeři</a>
+        <a href="admin-badges.html">Badges</a>
+        <a href="admin-revenue-share.html">Revenue share</a>
+      </nav>
+    </div>
+    <div class="admin-auth">
+      <input type="password" id="adminPasswordInput" placeholder="Admin heslo" autocomplete="current-password">
+      <button type="button" class="btn btn-brass btn-sm" id="loadBtn">Načíst reporty</button>
+      <span class="admin-auth-note" id="authNote"></span>
+    </div>
+  </div>
+</header>
+
+<main class="admin-main">
+  <div class="demo-warning">
+    Reporty se vytváří automaticky, jakmile platba za <code>vin_basic_report</code>
+    nebo <code>manual_car_review</code> přejde do stavu <code>paid</code> — žádné
+    tlačítko „Nový report“ tady záměrně není. Pracovní postup:
+    <code>created → in_review → draft_ready → report_ready → report_sent → completed</code>
+    (nebo <code>cancelled</code> kdykoliv). Doručení hotového reportu zákazníkovi
+    je samostatný, ještě neimplementovaný krok — tahle stránka je jen interní
+    evidence a řízení stavu.
+  </div>
+
+  <div class="admin-toolbar">
+    <div class="admin-filters">
+      <select id="filterStatus">
+        <option value="">Vše — stav</option>
+        <option value="created">created</option>
+        <option value="in_review">in_review</option>
+        <option value="draft_ready">draft_ready</option>
+        <option value="report_ready">report_ready</option>
+        <option value="report_sent">report_sent</option>
+        <option value="completed">completed</option>
+        <option value="cancelled">cancelled</option>
+      </select>
+      <select id="filterReportType">
+        <option value="">Vše — typ</option>
+        <option value="vin_basic_report">vin_basic_report</option>
+        <option value="manual_car_review">manual_car_review</option>
+        <option value="inspection_report">inspection_report</option>
+      </select>
+      <select id="filterEntityType">
+        <option value="">Vše — entita</option>
+        <option value="vin_check">vin_check</option>
+        <option value="booking">booking</option>
+        <option value="manual_review">manual_review</option>
+      </select>
+      <input type="search" id="filterSearch" placeholder="Hledat ID, e-mail, titulek…">
+    </div>
+    <div class="admin-actions">
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="refreshBtn">Obnovit</button>
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="exportBtn">Export CSV</button>
+    </div>
+  </div>
+
+  <p class="admin-status" id="listStatus">Zadejte admin heslo a klikněte na „Načíst reporty“.</p>
+
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Datum</th>
+          <th>Typ</th>
+          <th>Entita</th>
+          <th>Stav</th>
+          <th>Riziko</th>
+          <th>Skóre</th>
+          <th>E-mail</th>
+          <th>Odkaz</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="reportsTbody"></tbody>
+    </table>
+  </div>
+
+  <p class="admin-empty" id="emptyState" style="display:none;">Žádné reporty neodpovídají filtru.</p>
+</main>
+
+<!-- Report detail -->
+<div class="modal-overlay" id="detailOverlay">
+  <div class="modal-box" style="max-width:760px;">
+    <button class="modal-close" id="detailClose" aria-label="Zavřít">&times;</button>
+    <h3>Detail reportu</h3>
+    <dl class="detail-fields" id="detailFields"></dl>
+
+    <div class="admin-tabs">
+      <button type="button" class="admin-tab-btn active" data-tab="summary">Summary</button>
+      <button type="button" class="admin-tab-btn" data-tab="sections">Sections</button>
+      <button type="button" class="admin-tab-btn" data-tab="preview">Preview</button>
+      <button type="button" class="admin-tab-btn" data-tab="history">History</button>
+    </div>
+
+    <!-- Summary tab: status transition + report-level content + note -->
+    <div class="admin-tab-panel active" data-tab-panel="summary">
+      <h4 style="margin:0 0 8px;font-size:0.95rem;">Změna stavu</h4>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+        <div class="modal-field" style="margin-bottom:0;min-width:160px;">
+          <label for="detailStatus">Nový stav</label>
+          <select id="detailStatus">
+            <option value="created">created</option>
+            <option value="in_review">in_review</option>
+            <option value="draft_ready">draft_ready</option>
+            <option value="report_ready">report_ready</option>
+            <option value="report_sent">report_sent</option>
+            <option value="completed">completed</option>
+            <option value="cancelled">cancelled</option>
+          </select>
+        </div>
+        <div class="modal-field" style="margin-bottom:0;flex:1;min-width:200px;">
+          <label for="detailStatusReason">Důvod (nepovinné)</label>
+          <input type="text" id="detailStatusReason" placeholder="např. Analyst dokončil review">
+        </div>
+        <button type="button" class="btn btn-brass" id="detailStatusSave">Uložit stav</button>
+      </div>
+      <p class="form-status" id="detailStatusMsg"></p>
+      <p style="font-size:0.8rem;color:var(--text-muted-dark);margin:-4px 0 16px;">
+        <code>draft_ready</code> vyžaduje vyplněné overview/final_verdict/disclaimer.
+        <code>report_ready</code> vyžaduje vyplněné všechny sekce — viz záložka „Sections“.
+      </p>
+
+      <h4 style="margin:20px 0 8px;font-size:0.95rem;">Doručení klientovi</h4>
+      <dl class="detail-fields" style="margin-bottom:12px;">
+        <div><span class="k">Veřejný odkaz</span><span class="v" id="detailTokenPreview">—</span></div>
+        <div><span class="k">Odesláno</span><span class="v" id="detailSentAtView">—</span></div>
+        <div><span class="k">Doručeno</span><span class="v" id="detailDeliveredAtView">—</span></div>
+      </dl>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="btn btn-ghost on-paper btn-sm" id="detailGenerateLinkBtn">Generate public link</button>
+        <button type="button" class="btn btn-ghost on-paper btn-sm" id="detailCopyLinkBtn" disabled>Copy link</button>
+        <button type="button" class="btn btn-ghost on-paper btn-sm" id="detailRevokeLinkBtn" disabled>Revoke link</button>
+        <button type="button" class="btn btn-brass btn-sm" id="detailSendToCustomerBtn">Send to customer</button>
+      </div>
+      <p style="font-size:0.8rem;color:var(--text-muted-dark);margin:6px 0 0;">
+        „Send to customer“ vyžaduje stav <code>report_ready</code> a vyplněný e-mail
+        zákazníka. Pokud e-mail nejde odeslat (SMTP vypnuto/nefunguje), odkaz se
+        i tak vytvoří a dá se sdílet ručně — stav se na <code>report_sent</code>
+        nepřepne, dokud e-mail opravdu neodejde.
+      </p>
+      <p class="form-status" id="detailDeliveryMsg"></p>
+
+      <h4 style="margin:20px 0 8px;font-size:0.95rem;">Obsah reportu</h4>
+      <div class="modal-field">
+        <label for="detailTitle">Titulek</label>
+        <input type="text" id="detailTitle">
+      </div>
+      <div class="modal-field">
+        <label for="detailSummary">Shrnutí</label>
+        <textarea id="detailSummary" rows="4"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <div class="modal-field" style="flex:1;min-width:140px;">
+          <label for="detailVerdict">Verdikt</label>
+          <input type="text" id="detailVerdict">
+        </div>
+        <div class="modal-field" style="min-width:120px;">
+          <label for="detailRiskLevel">Riziko</label>
+          <select id="detailRiskLevel">
+            <option value="">—</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </select>
+        </div>
+        <div class="modal-field" style="min-width:100px;">
+          <label for="detailScore">Skóre (0–100)</label>
+          <input type="number" id="detailScore" min="0" max="100">
+        </div>
+      </div>
+      <button type="button" class="btn btn-brass" id="detailSummarySave">Uložit obsah</button>
+      <p class="form-status" id="detailSummaryMsg"></p>
+
+      <h4 style="margin:20px 0 8px;font-size:0.95rem;">Interní poznámka</h4>
+      <div class="modal-field">
+        <textarea id="detailNote" rows="3" maxlength="5000"></textarea>
+      </div>
+      <button type="button" class="btn btn-brass" id="detailNoteSave">Uložit poznámku</button>
+      <p class="form-status" id="detailNoteMsg"></p>
+    </div>
+
+    <!-- Sections tab: the manual report builder itself -->
+    <div class="admin-tab-panel" data-tab-panel="sections">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+        <p style="margin:0;font-size:0.85rem;color:var(--text-muted-dark);">
+          Sekce jsou vytvořené automaticky podle typu reportu. Přetáhnout pořadí
+          nejde myší — použijte šipky ↑/↓ u každé sekce.
+        </p>
+        <button type="button" class="btn btn-ghost on-paper btn-sm" id="detailResetSectionsBtn">Reset na výchozí</button>
+      </div>
+      <p class="form-status" id="detailSectionsMsg"></p>
+
+      <!-- AI helper panel -->
+      <div style="margin:0 0 18px;padding:12px 14px;border:1px solid rgba(27,33,41,0.1);border-radius:4px;background:var(--paper-2);">
+        <h4 style="margin:0 0 4px;font-size:0.9rem;">AI helper (mock provider — draft only)</h4>
+        <p style="margin:0 0 10px;font-size:0.78rem;color:var(--text-muted-dark);">
+          AI výstup se do sekce NIKDY nezapíše automaticky. Musí projít
+          Approve/Reject, a teprve schválený běh lze tlačítkem „Apply"
+          vložit do reportu. <a href="admin-ai-runs.html" target="_blank" rel="noopener" id="detailAiHistoryLink">Celá historie běhů ↗</a>
+        </p>
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+          <div class="modal-field" style="margin-bottom:0;min-width:180px;">
+            <label for="aiAgentSelect">Agent</label>
+            <select id="aiAgentSelect">
+              <option value="listing_analysis">listing_analysis</option>
+              <option value="risk_scoring">risk_scoring</option>
+              <option value="report_writer">report_writer</option>
+              <option value="buyer_advisor">buyer_advisor</option>
+              <option value="vin_risk_explanation">vin_risk_explanation</option>
+            </select>
+          </div>
+          <button type="button" class="btn btn-brass btn-sm" id="aiRunBtn">Run agent</button>
+        </div>
+        <p class="form-status" id="aiRunMsg"></p>
+
+        <div id="aiRunResultPanel" style="display:none;margin-top:10px;">
+          <pre id="aiRunOutput" style="background:#fff;padding:10px 12px;border-radius:4px;font-size:0.78rem;overflow-x:auto;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow-y:auto;margin:0 0 8px;"></pre>
+          <div class="modal-field" style="margin-bottom:8px;">
+            <label for="aiReviewNote">Poznámka k review (nepovinné)</label>
+            <input type="text" id="aiReviewNote">
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button type="button" class="btn btn-ghost on-paper btn-sm" id="aiApproveBtn">Approve</button>
+            <button type="button" class="btn btn-ghost on-paper btn-sm" id="aiRejectBtn">Reject</button>
+            <button type="button" class="btn btn-brass btn-sm" id="aiApplyBtn" disabled>Apply to report</button>
+            <span id="aiReviewStateLabel" style="font-size:0.78rem;color:var(--text-muted-dark);"></span>
+          </div>
+          <p class="form-status" id="aiReviewMsg"></p>
+        </div>
+      </div>
+
+      <div id="detailSectionsList"></div>
+    </div>
+
+    <!-- Preview tab -->
+    <div class="admin-tab-panel" data-tab-panel="preview">
+      <p style="font-size:0.8rem;color:var(--text-muted-dark);margin:0 0 12px;">
+        Interní admin náhled — ne veřejná stránka, zákazník tohle nikdy neuvidí
+        (doručení hotového reportu je samostatný, zatím neimplementovaný krok).
+      </p>
+      <div id="detailPreview" class="report-preview"></div>
+    </div>
+
+    <!-- History tab -->
+    <div class="admin-tab-panel" data-tab-panel="history">
+      <div id="detailHistory" class="email-log-detail" style="max-height:320px;overflow-y:auto;"></div>
+    </div>
+
+    <button type="button" class="btn btn-ghost on-paper btn-block" id="detailCloseBtn2" style="margin-top:18px;">Zavřít</button>
+  </div>
+</div>
+
+<script src="js/config.js"></script>
+<script type="module" src="js/admin/admin-reports.js"></script>
+</body>
+</html>

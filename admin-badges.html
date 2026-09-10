@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEXIUM — Admin: Badges</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/admin.css">
+</head>
+<body class="admin-body">
+
+<header class="admin-header">
+  <div class="admin-header-inner">
+    <div class="admin-brand-block">
+      <div class="admin-brand">NEXIUM <span class="admin-brand-sub">· Admin · Badges</span></div>
+      <nav class="admin-nav">
+        <a href="admin-leads.html">Leady</a>
+        <a href="admin-bookings.html">Objednávky</a>
+        <a href="admin-vin-checks.html">VIN kontroly</a>
+        <a href="admin-email-logs.html">Email logy</a>
+        <a href="admin-payments.html">Platby</a>
+        <a href="admin-agents.html">Agenti</a>
+        <a href="admin-reports.html">Reporty</a>
+        <a href="admin-ai-runs.html">AI runs</a>
+        <a href="admin-agent-tasks.html">Agent tasks</a>
+        <a href="admin-inspectors.html">Technici</a>
+        <a href="admin-inspection-jobs.html">Osmotra</a>
+        <a href="admin-dealers.html">Dealeři</a>
+        <a href="admin-badges.html" class="active">Badges</a>
+        <a href="admin-revenue-share.html">Revenue share</a>
+      </nav>
+    </div>
+    <div class="admin-auth">
+      <input type="password" id="adminPasswordInput" placeholder="Admin heslo" autocomplete="current-password">
+      <button type="button" class="btn btn-brass btn-sm" id="loadBtn">Načíst badges</button>
+      <span class="admin-auth-note" id="authNote"></span>
+    </div>
+  </div>
+</header>
+
+<main class="admin-main">
+  <div class="demo-warning">
+    Badge nikdy nevzniká automaticky — žádost („requested") vytváří admin
+    na <a href="admin-dealers.html">stránce Dealeři</a> (jen pro
+    verified dealera), a jen admin ji tady schválí, zamítne, nebo
+    zruší. „Expired" nastává automaticky podle data expirace, nikdy ho
+    nenastavuje admin ručně.
+  </div>
+
+  <div class="admin-toolbar">
+    <div class="admin-filters">
+      <select id="filterStatus">
+        <option value="">Vše — stav</option>
+        <option value="requested">requested</option>
+        <option value="approved">approved</option>
+        <option value="rejected">rejected</option>
+        <option value="revoked">revoked</option>
+        <option value="expired">expired</option>
+      </select>
+      <input type="search" id="filterSearch" placeholder="Hledat ID, kód, dealera…">
+    </div>
+    <div class="admin-actions">
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="refreshBtn">Obnovit</button>
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="exportBtn">Export CSV</button>
+    </div>
+  </div>
+
+  <p class="admin-status" id="listStatus">Zadejte admin heslo a klikněte na „Načíst badges".</p>
+
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Vytvořeno</th>
+          <th>Kód</th>
+          <th>Vozidlo</th>
+          <th>Vyprší</th>
+          <th>Stav</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="badgesTbody"></tbody>
+    </table>
+  </div>
+
+  <p class="admin-empty" id="emptyState" style="display:none;">Žádné badges neodpovídají filtru.</p>
+</main>
+
+<!-- Detail -->
+<div class="modal-overlay" id="detailOverlay">
+  <div class="modal-box" style="max-width:560px;">
+    <button class="modal-close" id="detailClose" aria-label="Zavřít">&times;</button>
+    <h3>Detail badge</h3>
+    <dl class="detail-fields" id="detailFields"></dl>
+
+    <div style="margin:0 0 16px;padding:10px 12px;border:1px solid rgba(27,33,41,0.1);border-radius:4px;background:var(--paper-2);">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <code id="detailBadgeCode" style="font-size:1rem;"></code>
+        <button type="button" class="btn btn-ghost on-paper btn-sm" id="copyCodeBtn">Copy code</button>
+        <button type="button" class="btn btn-ghost on-paper btn-sm" id="copyLinkBtn">Copy public link</button>
+      </div>
+      <p style="font-size:0.78rem;color:var(--text-muted-dark);margin:6px 0 0;">
+        Veřejná stránka: <a id="publicLinkPreview" href="#" target="_blank" rel="noopener"></a>
+      </p>
+    </div>
+
+    <div class="modal-field">
+      <label for="detailExpiresAt">Datum expirace (jen pro approve)</label>
+      <input type="datetime-local" id="detailExpiresAt">
+    </div>
+    <div class="modal-field">
+      <label for="detailInternalNote">Interní poznámka</label>
+      <textarea id="detailInternalNote" rows="3" maxlength="2000"></textarea>
+    </div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button type="button" class="btn btn-brass btn-sm" id="approveBtn">Approve</button>
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="rejectBtn">Reject</button>
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="revokeBtn">Revoke</button>
+    </div>
+    <p class="form-status" id="detailStatusMsg"></p>
+
+    <button type="button" class="btn btn-ghost on-paper btn-block" id="detailCloseBtn2" style="margin-top:18px;">Zavřít</button>
+  </div>
+</div>
+
+<script src="js/config.js"></script>
+<script type="module" src="js/admin/admin-badges.js"></script>
+</body>
+</html>

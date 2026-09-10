@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEXIUM — Admin: Agent tasks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/admin.css">
+</head>
+<body class="admin-body">
+
+<header class="admin-header">
+  <div class="admin-header-inner">
+    <div class="admin-brand-block">
+      <div class="admin-brand">NEXIUM <span class="admin-brand-sub">· Admin · Agent tasks</span></div>
+      <nav class="admin-nav">
+        <a href="admin-leads.html">Leady</a>
+        <a href="admin-bookings.html">Objednávky</a>
+        <a href="admin-vin-checks.html">VIN kontroly</a>
+        <a href="admin-email-logs.html">Email logy</a>
+        <a href="admin-payments.html">Platby</a>
+        <a href="admin-agents.html">Agenti</a>
+        <a href="admin-reports.html">Reporty</a>
+        <a href="admin-ai-runs.html">AI runs</a>
+        <a href="admin-agent-tasks.html" class="active">Agent tasks</a>
+        <a href="admin-inspectors.html">Technici</a>
+        <a href="admin-inspection-jobs.html">Osmotra</a>
+        <a href="admin-dealers.html">Dealeři</a>
+        <a href="admin-badges.html">Badges</a>
+        <a href="admin-revenue-share.html">Revenue share</a>
+      </nav>
+    </div>
+    <div class="admin-auth">
+      <input type="password" id="adminPasswordInput" placeholder="Admin heslo" autocomplete="current-password">
+      <button type="button" class="btn btn-brass btn-sm" id="loadBtn">Načíst tasks</button>
+      <span class="admin-auth-note" id="authNote"></span>
+    </div>
+  </div>
+</header>
+
+<main class="admin-main">
+  <div class="demo-warning">
+    Business agenti (CRM Follow-up, B2B Sales, Support, Operations/Payment
+    Assistant) jen <strong>navrhují</strong> — negenerují a neposílají nic
+    automaticky, nemění stav žádné platby/leadu/objednávky, nic nemažou.
+    Každý návrh je jeden řádek tady, se stavem
+    <code>open → reviewed → completed/dismissed</code>, který nastavuje
+    výhradně admin ručně.
+  </div>
+
+  <div class="admin-toolbar">
+    <div class="admin-filters">
+      <select id="filterAgentName">
+        <option value="">Vše — agent</option>
+        <option value="crm_follow_up">crm_follow_up</option>
+        <option value="b2b_sales">b2b_sales</option>
+        <option value="support">support</option>
+        <option value="operations_payment">operations_payment</option>
+      </select>
+      <select id="filterStatus">
+        <option value="">Vše — stav</option>
+        <option value="open">open</option>
+        <option value="reviewed">reviewed</option>
+        <option value="completed">completed</option>
+        <option value="dismissed">dismissed</option>
+      </select>
+      <select id="filterEntityType">
+        <option value="">Vše — entita</option>
+        <option value="lead">lead</option>
+        <option value="booking">booking</option>
+        <option value="vin_check">vin_check</option>
+        <option value="payment">payment</option>
+      </select>
+      <input type="search" id="filterSearch" placeholder="Hledat ID, entitu, titulek…">
+    </div>
+    <div class="admin-actions">
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="refreshBtn">Obnovit</button>
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="exportBtn">Export CSV</button>
+    </div>
+  </div>
+
+  <!-- Ad-hoc run panel — lets any of the 4 business agents run against
+       any entity, not just the 3 with dedicated buttons elsewhere. -->
+  <div class="admin-table-wrap" style="padding:16px 18px;margin-bottom:20px;">
+    <h3 style="margin:0 0 12px;font-size:1rem;">Spustit business agenta ručně</h3>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+      <div class="modal-field" style="margin-bottom:0;min-width:180px;">
+        <label for="runAgentSelect">Agent</label>
+        <select id="runAgentSelect">
+          <option value="crm_follow_up">crm_follow_up (lead, booking)</option>
+          <option value="b2b_sales">b2b_sales (lead)</option>
+          <option value="support">support (lead, booking, vin_check, payment)</option>
+          <option value="operations_payment">operations_payment (payment)</option>
+        </select>
+      </div>
+      <div class="modal-field" style="margin-bottom:0;min-width:140px;">
+        <label for="runEntityType">Typ entity</label>
+        <select id="runEntityType">
+          <option value="lead">lead</option>
+          <option value="booking">booking</option>
+          <option value="vin_check">vin_check</option>
+          <option value="payment">payment</option>
+        </select>
+      </div>
+      <div class="modal-field" style="margin-bottom:0;min-width:200px;">
+        <label for="runEntityId">ID entity</label>
+        <input type="text" id="runEntityId" placeholder="lead_xxxxxxxxxxxx">
+      </div>
+      <button type="button" class="btn btn-brass" id="runAgentBtn">Spustit</button>
+    </div>
+    <p class="form-status" id="runAgentMsg"></p>
+  </div>
+
+  <p class="admin-status" id="listStatus">Zadejte admin heslo a klikněte na „Načíst tasks".</p>
+
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Datum</th>
+          <th>Agent</th>
+          <th>Entita</th>
+          <th>Typ úkolu</th>
+          <th>Titulek</th>
+          <th>Stav</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="agentTasksTbody"></tbody>
+    </table>
+  </div>
+
+  <p class="admin-empty" id="emptyState" style="display:none;">Žádné agent tasks neodpovídají filtru.</p>
+</main>
+
+<!-- Task detail -->
+<div class="modal-overlay" id="detailOverlay">
+  <div class="modal-box" style="max-width:640px;">
+    <button class="modal-close" id="detailClose" aria-label="Zavřít">&times;</button>
+    <h3>Detail agent tasku</h3>
+    <dl class="detail-fields" id="detailFields"></dl>
+
+    <div id="detailMessageWrap" style="display:none;">
+      <h4 style="margin:16px 0 6px;font-size:0.95rem;">Navrhovaná zpráva (draft)</h4>
+      <pre id="detailMessage" style="background:var(--paper-2);padding:10px 12px;border-radius:4px;font-size:0.85rem;white-space:pre-wrap;word-break:break-word;margin:0 0 8px;"></pre>
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="detailCopyBtn">Copy suggested message</button>
+      <p style="font-size:0.78rem;color:var(--text-muted-dark);margin:6px 0 0;">
+        Kopíruje text do schránky — odeslání zůstává čistě na adminovi,
+        nic se neděje automaticky.
+      </p>
+    </div>
+
+    <h4 style="margin:16px 0 6px;font-size:0.95rem;">Stav</h4>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="detailMarkReviewedBtn">Mark reviewed</button>
+      <button type="button" class="btn btn-brass btn-sm" id="detailMarkCompletedBtn">Mark completed</button>
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="detailDismissBtn">Dismiss</button>
+    </div>
+    <p class="form-status" id="detailStatusMsg"></p>
+
+    <button type="button" class="btn btn-ghost on-paper btn-block" id="detailCloseBtn2" style="margin-top:18px;">Zavřít</button>
+  </div>
+</div>
+
+<script src="js/config.js"></script>
+<script type="module" src="js/admin/admin-agent-tasks.js"></script>
+</body>
+</html>

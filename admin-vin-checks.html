@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEXIUM — Admin: VIN kontroly</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/admin.css">
+</head>
+<body class="admin-body">
+
+<header class="admin-header">
+  <div class="admin-header-inner">
+    <div class="admin-brand-block">
+      <div class="admin-brand">NEXIUM <span class="admin-brand-sub">· Admin · VIN kontroly</span></div>
+      <nav class="admin-nav">
+        <a href="admin-leads.html">Leady</a>
+        <a href="admin-bookings.html">Objednávky</a>
+        <a href="admin-vin-checks.html" class="active">VIN kontroly</a>
+        <a href="admin-email-logs.html">Email logy</a>
+        <a href="admin-payments.html">Platby</a>
+        <a href="admin-agents.html">Agenti</a>
+        <a href="admin-reports.html">Reporty</a>
+        <a href="admin-ai-runs.html">AI runs</a>
+        <a href="admin-agent-tasks.html">Agent tasks</a>
+        <a href="admin-inspectors.html">Technici</a>
+        <a href="admin-inspection-jobs.html">Osmotra</a>
+        <a href="admin-dealers.html">Dealeři</a>
+        <a href="admin-badges.html">Badges</a>
+        <a href="admin-revenue-share.html">Revenue share</a>
+      </nav>
+    </div>
+    <div class="admin-auth">
+      <input type="password" id="adminPasswordInput" placeholder="Admin heslo" autocomplete="current-password">
+      <button type="button" class="btn btn-brass btn-sm" id="loadBtn">Načíst VIN kontroly</button>
+      <span class="admin-auth-note" id="authNote"></span>
+    </div>
+  </div>
+</header>
+
+<main class="admin-main">
+  <div class="demo-warning">
+    <span class="demo-badge">Demo</span>
+    Všechny výsledky na této stránce jsou deterministické demo-výsledky
+    generované ze samotného VIN kódu — nejde o oficiální prověření
+    historie vozidla. Reálná VIN-integrace bude samostatný krok.
+  </div>
+
+  <div class="admin-toolbar">
+    <div class="admin-filters">
+      <select id="filterRisk">
+        <option value="">Vše — riziko</option>
+        <option value="low">low</option>
+        <option value="medium">medium</option>
+        <option value="high">high</option>
+      </select>
+      <input type="search" id="filterSearch" placeholder="Hledat VIN, ID, zdroj, jazyk…">
+    </div>
+    <div class="admin-actions">
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="refreshBtn">Obnovit</button>
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="exportBtn">Export CSV</button>
+    </div>
+  </div>
+
+  <p class="admin-status" id="listStatus">Zadejte admin heslo a klikněte na „Načíst VIN kontroly“.</p>
+
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Datum</th>
+          <th>ID</th>
+          <th>VIN</th>
+          <th>Skóre</th>
+          <th>Riziko</th>
+          <th>Rok</th>
+          <th>Km (odhad)</th>
+          <th>Km (inzerát)</th>
+          <th>Nehody</th>
+          <th>Majitelé</th>
+          <th>Tachometr</th>
+          <th>Jazyk</th>
+          <th>Zdroj</th>
+          <th></th>
+          <th>Platba</th>
+          <th>Agent</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="vinChecksTbody"></tbody>
+    </table>
+  </div>
+
+  <p class="admin-empty" id="emptyState" style="display:none;">Žádné VIN kontroly neodpovídají filtru.</p>
+</main>
+
+<!-- VIN check detail — read-only except for the internal admin note -->
+<div class="modal-overlay" id="detailOverlay">
+  <div class="modal-box" style="max-width:560px;">
+    <button class="modal-close" id="detailClose" aria-label="Zavřít">&times;</button>
+    <h3>Detail VIN kontroly</h3>
+    <div class="demo-warning">
+      <span class="demo-badge">Demo</span>
+      This is a deterministic demo result, not an official vehicle history report.
+    </div>
+    <dl class="detail-fields" id="detailFields"></dl>
+
+    <div id="vinProviderPanel" style="margin:0 0 16px;padding:12px 14px;border:1px solid rgba(27,33,41,0.1);border-radius:4px;background:var(--paper-2);">
+      <h4 style="margin:0 0 6px;font-size:0.9rem;">Real VIN provider</h4>
+      <p id="vinProviderModeNote" style="margin:0 0 10px;font-size:0.78rem;color:var(--text-muted-dark);"></p>
+      <button type="button" class="btn btn-brass btn-sm" id="vinRunProviderBtn">Run real VIN provider</button>
+      <p class="form-status" id="vinRunProviderMsg"></p>
+      <div id="vinProviderRunsList" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="modal-field">
+      <label for="detailNote">Interní poznámka (jen pro admin, zákazník ji nevidí)</label>
+      <textarea id="detailNote" rows="4" maxlength="5000"></textarea>
+    </div>
+    <div class="modal-field">
+      <label for="detailAssignedAgent">Přiřazený agent</label>
+      <select id="detailAssignedAgent"><option value="">— Nepřiřazeno —</option></select>
+    </div>
+    <p class="form-status" id="detailNoteStatus"></p>
+    <button type="button" class="btn btn-brass" id="detailNoteSave">Save note</button>
+
+    <button type="button" class="btn btn-ghost on-paper btn-block" id="detailCloseBtn2" style="margin-top:14px;">Zavřít</button>
+  </div>
+</div>
+
+<script src="js/config.js"></script>
+<script type="module" src="js/admin/admin-vin-checks.js"></script>
+</body>
+</html>
