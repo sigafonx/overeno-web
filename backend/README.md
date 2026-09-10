@@ -1398,21 +1398,22 @@ opravdu doručeným e-mailem.
 
 ## AI orchestrator foundation
 
-Fundamentálně tenhle krok NEDĚLÁ chytré AI — dělá **kostru**: registr
-agentů, orchestrátor, logging každého běhu, bezpečnostní limity, a
-hlavně **povinné human review** předtím, než cokoliv z AI výstupu
-kamkoliv jde. Jediný skutečně fungující provider je `mock` —
-deterministický, offline, bez nákladů, bez síťového volání.
+Základ: registr agentů, orchestrátor, logging každého běhu, bezpečnostní
+limity, a hlavně **povinné human review** předtím, než cokoliv z AI
+výstupu kamkoliv jde. Dva providery skutečně fungují: `mock`
+(deterministický, offline, bez nákladů) a **`openai`** (skutečné
+volání OpenAI API — viz «GPT API readiness» níže pro plné zapojení,
+error handling a jak otestovat).
 
-### Proč jen 5 agentů, ne všech (budoucích) 15
+### 14 agentů (5 report + 9 business), architektura pro dalších 5 plánovaných
 
-Tenhle krok schválně staví fundament, ne celý systém — 5 zaregistrovaných
-agentů (`listing_analysis`, `risk_scoring`, `report_writer`,
-`buyer_advisor`, `vin_risk_explanation`) ověří, že orchestrátor, logging,
-review workflow a bezpečnostní limity fungují správně, než se přidají
-další. Registr (`backend/ai/agentRegistry.js`) je navržený tak, aby
-přidání dalšího agenta byl jeden nový záznam + jeden prompt builder, ne
-změna architektury.
+Registr (`backend/ai/agentRegistry.js`) obsahuje 5 report-kind agentů
+(`listing_analysis`, `risk_scoring`, `report_writer`, `buyer_advisor`,
+`vin_risk_explanation`) + 9 business-kind agentů (viz «AI agents — wave
+2/3» níže) — dohromady pokrývají celý požadovaný katalog pro řízení
+firmy. Přidání dalšího agenta (z 5 zatím plánovaných, viz «GPT API
+readiness»'s tabulka) je jeden nový záznam v registru + jeden prompt
+builder, ne změna architektury.
 
 ### Proč AI výstup nejde nikam automaticky
 
@@ -1439,10 +1440,9 @@ změna architektury.
 
 ```bash
 AI_ENABLED=false          # master switch — stejný vzor jako PAYMENTS_ENABLED/EMAIL_ENABLED
-AI_PROVIDER=mock          # jediný skutečně implementovaný — "openai"/"anthropic" se přijmou,
-                           # ale nikdy nespustí reálné volání (viz níže)
+AI_PROVIDER=mock          # mock (default, zdarma) | openai (skutečné volání, viz "GPT API readiness") | anthropic (přijme se, ale isConfigured()=false)
 AI_MODEL=
-AI_API_KEY=                # nikdy necommitovat, jen do lokálního .env
+AI_API_KEY=                # jen pro AI_PROVIDER mimo openai/mock — nikdy necommitovat
 AI_MAX_INPUT_CHARS=20000  # tvrdý limit na input (JSON-stringified), hlavní cost control
 AI_REQUIRE_HUMAN_REVIEW=true  # viz "Proč AI výstup nejde nikam automaticky" výše — tahle
                                 # proměnná review nevypíná, i kdyby byla false
@@ -1454,16 +1454,18 @@ AI_REQUIRE_HUMAN_REVIEW=true  # viz "Proč AI výstup nejde nikam automaticky" v
 input vždy dá stejný `prompt-hash` (sha256 promptu, prvních 12 znaků) v
 textu výstupu — ověřitelné bez skutečného modelu. Žádné síťové volání,
 žádné náklady, `estimatedCost` je jen fiktivní ukázkové číslo označené
-`(mock estimate)`.
+`(mock estimate)`. Tohle je automatický fallback — kdykoliv
+`AI_PROVIDER≠openai`, nebo `openai` není nakonfigurovaný (chybí klíč
+nebo `AI_MONTHLY_BUDGET_LIMIT`), agent prostě neběží vůbec (jasná
+`PROVIDER_NOT_CONFIGURED` chyba) — mock se nikdy nezvolí automaticky
+jako tichý fallback za nefunkční reálný provider, výběr providera je
+vždy explicitní přes `AI_PROVIDER`.
 
-**Reálné providery (`openai`/`anthropic`) nejsou v tomhle kroku
-implementované** — v tomhle prostředí není síťový přístup k
-`api.openai.com`/`api.anthropic.com`, takže napojit SDK teď by znamenalo
-další reviewed-but-unverified kód (stejná situace jako
-`stripeProvider.js` — viz jeho vlastní poznámku výše). Výběr
-`AI_PROVIDER=openai` nespadne backend — `isConfigured()` vrátí `false`,
-`POST /admin/ai/run` odpoví `503 PROVIDER_NOT_CONFIGURED` s jasnou
-zprávou, běh se uloží jako `failed`.
+**`openai` je implementovaný a otestovaný proti skutečnému
+`api.openai.com`** (viz «GPT API readiness» níže pro plné zapojení,
+error handling, cenový odhad a jak otestovat). `anthropic` (nebo
+jakýkoliv jiný název) se přijme bez pádu backendu, ale `isConfigured()`
+vrátí `false` — `POST /admin/ai/run` odpoví `503 PROVIDER_NOT_CONFIGURED`.
 
 ### Bezpečnostní limity (`backend/ai/safety/`)
 
@@ -1638,14 +1640,19 @@ review nikdy nevypíná (viz «AI orchestrator foundation» výše).
 Mock výstup je psaný anglicky bez ohledu na `report.language` — reálný
 provider by tohle respektoval, mock v tomhle kroku ne (mimo scope).
 
-## AI agents — wave 2 (business agenti)
+## AI agents — wave 2/3 (business agenti)
 
-Čtyři noví agenti mimo report workflow — pomáhají s CRM, B2B prodejem,
-supportem a operativou kolem plateb. Architektonicky jiná kategorie než
-wave 1: **negenerují ai_agent_runs a nemají "apply" krok** — místo toho
-každý běh rovnou vytvoří jeden nebo víc `agent_tasks` řádků, a stav
-tasku samotného (`open → reviewed → completed/dismissed`) JE ten
-human-review mechanismus.
+Devět agentů mimo report workflow — 4 z původního kroku (CRM, B2B
+prodej, support, operace kolem plateb) + 5 nových, které dohromady
+pokrývají celý požadovaný katalog pro řízení firmy (Lead Qualification /
+VIN Report [= wave-1 `vin_risk_explanation`] / Booking Coordinator /
+Payment Control [= `operations_payment`] / Email Support [= `support`,
+teď i pro `email_log`] / Admin Operations / Revenue Share / Business
+Growth). Architektonicky jiná kategorie než wave 1: **negenerují
+ai_agent_runs a nemají "apply" krok** — místo toho každý běh rovnou
+vytvoří jeden nebo víc `agent_tasks` řádků, a stav tasku samotného
+(`open → reviewed → completed/dismissed`) JE ten human-review
+mechanismus.
 
 ### Co AI smí a nesmí (nejdůležitější část tohohle kroku)
 
@@ -1662,14 +1669,22 @@ human-review mechanismus.
 - Jediné, co tenhle krok skutečně dělá: **navrhuje** akci a text pro
   admina, který sám rozhodne, jestli/jak to použije.
 
-### 4 agenti
+### 9 agentů
 
 | Agent | entityTypes | Co dělá |
 |---|---|---|
 | `crm_follow_up` | lead, booking | Navrhne další krok + draft follow-up zprávy |
 | `b2b_sales` | lead | Osnova nabídky + call script pro dealer/inspector lead |
-| `support` | lead, booking, vin_check, payment | Draft vysvětlení stavu pro zákazníka, bez právních záruk |
-| `operations_payment` | payment | Co zkontrolovat u failed/cancelled/paid platby — nikdy nemění stav |
+| `support` (**Email Support Agent**) | lead, booking, vin_check, payment, **email_log** | Draft vysvětlení stavu / follow-up e-mailu, bez právních záruk — nikdy nic samo neodešle |
+| `operations_payment` (**Payment Control Agent**) | payment | Co zkontrolovat u failed/cancelled/paid platby — nikdy nemění stav |
+| `lead_qualification` (**Lead Qualification Agent**) | lead | Kontrola úplnosti dat + odhad urgence + návrh dalšího kroku |
+| `booking_coordinator_agent` (**Booking Coordinator Agent**) | booking | Checklist před přiřazením technika — nikdy sám nepřiřazuje |
+| `admin_operations` (**Admin Operations Agent**) | dashboard | Denní souhrn napříč leads/bookings/vin_checks/payments/email_logs — jen agregované počty, žádné PII |
+| `revenue_share_agent` (**Revenue Share Agent**) | revenue_share | Transparentní, read-only vysvětlení revenue-share výpočtu za měsíc — viz «Revenue-share 20%» níže |
+| `business_growth` (**Business Growth Agent**) | dashboard | Návrhy na růst/konverzi jako scénáře s předpoklady, nikdy garantovaná prognóza |
+
+`vin_risk_explanation` (**VIN Report Agent**) zůstává ve wave 1 výše —
+používá VIN check výsledek a nikdy si nevymýšlí data, která v něm nejsou.
 
 ### Sběr kontextu (`backend/ai/businessContext.js`)
 
@@ -1678,6 +1693,20 @@ součástí kontextu** — tihle agenti přímo draftují zprávu adresovanou
 konkrétní osobě, takže jméno pro personalizaci dává smysl. Pořád ale
 bez `email`/`phone` (nejsou potřeba k draftu textu, jen k jeho reálnému
 odeslání, což zůstává čistě na adminovi) a bez `internalNote`.
+
+Dva entityTypes nemají žádnou konkrétní entitu k načtení — `entityId` je
+tam jen popisek, ne skutečné ID:
+
+- **`dashboard`** (pro `admin_operations`/`business_growth`) — `entityId`
+  může být cokoliv (např. „today"). Kontext je vždy živý agregát za
+  posledních 7 dní (`newLeadsCount`, `bookingsNeedingActionCount`,
+  `failedPaymentsCount`, `failedEmailsCount`, `pendingVinChecksCount`, …)
+  — **nikdy** jméno/e-mail/telefon konkrétního záznamu, jen počty.
+- **`revenue_share`** (pro `revenue_share_agent`) — `entityId` musí být
+  `"YYYY-MM"` (např. `"2026-09"`); jiný formát vrátí validační chybu.
+  Kontext je čistě READ-ONLY — čte existující `revenue_share_ledger`/
+  `monthly_payouts` (přes `backend/revenueShare/revenueShareService.js`),
+  nikdy nic nepočítá ani nezapisuje.
 
 ### Tabulka `agent_tasks`
 
@@ -1714,10 +1743,28 @@ curl -H "x-admin-password: VASE_HESLO" http://localhost:3001/admin/agent-tasks/e
 
 ### admin-agent-tasks.html
 
-Devátá admin stránka. Seznam s filtry, panel pro ruční spuštění
-libovolného ze 4 agentů (agent/typ entity/ID), detail s tlačítkem
-„Copy suggested message" (kopíruje draft do schránky — odeslání zůstává
-na adminovi) a Mark reviewed/completed/Dismiss.
+Seznam s filtry, panel pro ruční spuštění libovolného z 9 business
+agentů (agent/typ entity/ID), detail s tlačítkem „Copy suggested
+message" (kopíruje draft do schránky — odeslání zůstává na adminovi) a
+Mark reviewed/completed/Dismiss.
+
+### Katalog agentů + AI health (admin-ai-runs.html)
+
+`admin-ai-runs.html` má navíc dva panely nahoře:
+
+- **AI health** (`GET /admin/ai/health`) — `aiEnabled`/`provider`/
+  `configured`/`model`/`openai.keyPresent`/`openai.budgetConfigured`/
+  `vin.vincarioEnabled`/`vin.vincarioKeyPresent`/`vin.vincarioSecretPresent`.
+  Nikdy žádná hodnota klíče, jen `true`/`false`.
+- **Katalog agentů** (`GET /admin/ai/agents`) — všech 14 registrovaných
+  agentů (5 report + 9 business) s `role`/`kind`/`entityTypes`/
+  `riskLevel`/`status`, a v detailu i `allowedActions`/`forbiddenActions`/
+  `systemPrompt` (shrnutí)/`inputTypes`/`outputFormat`. Tlačítko „Run
+  test" v detailu spustí agenta na zadané `entityId` — report-kind přes
+  `POST /admin/ai/run` (výsledek v tabulce AI runs na téže stránce),
+  business-kind přes `POST /admin/agents/run-business-agent` (výsledek
+  na `admin-agent-tasks.html`). API klíč se v tomhle panelu nikdy
+  nezobrazuje.
 
 ### Integrace do existujících admin stránek
 
@@ -1741,12 +1788,34 @@ nic.
 
 ### Honest status
 
-**Žádný konkrétní reálný VIN/vehicle-history provider není v tomhle
-kroku vybraný ani zapojený.** `backend/vin/realVinProviderAdapter.js`'s
-`real` režim je napsaný podle obecného vzoru (HTTP GET s Bearer tokenem,
-timeout, JSON odpověď), ne podle konkrétní zdokumentované schémy
-žádného konkrétního poskytovatele — protože žádný vybraný není. Než se
-tohle použije s reálnými penězi:
+**Vincario (api.vincario.com) je teď skutečně zapojený** —
+`backend/vin/vincarioProvider.js` implementuje jejich control-sum
+autentizaci a volá `decode/info` (primárně) s fallbackem na `decode`.
+Otestováno v tomhle kroku proti skutečnému `api.vincario.com` (ne jen
+teoreticky) — třemi různými VINy, viz níže. Dvě věci, které z toho
+plynou:
+
+1. **Vincario `decode`/`decode/info` vrací jen technické specifikace**
+   (výrobce/model/rok/motor/karoserie/…), **ne historii nehod/najeto km/
+   majitele** — to je u Vincario samostatný, placený VHR produkt, který
+   tenhle adaptér nevolá. `history`/`accidents`/`owners`/`score` proto
+   v normalizovaném výsledku zůstávají prázdné/`null`, nikdy vymyšlené.
+2. **Klíče v ukázkovém `.env.txt`, se kterými se tohle testovalo
+   (`0e84bc0986a5`/`7f2d5614db`), Vincario odmítl s `Invalid Control
+   sum`** — na třech různých reálných VINech konzistentně stejná chyba,
+   což ukazuje na neplatný/neaktivní pár klíč+secret (vypadají jako
+   ukázkové hodnoty z dokumentace Vincario, ne jako reálný placený
+   účet), ne na chybu v tomhle kódu. Backend to zpracoval přesně jak má:
+   nespadl, ukázal jasnou chybu adminovi, nikdy nevypsal klíč/secret/
+   control sum/plnou URL. S vlastním reálným klíčem z Vincario dashboardu
+   stačí je vyměnit v `.env` — nic dalšího se měnit nemusí.
+
+Starší, obecný `real` režim (`backend/vin/realVinProviderAdapter.js`,
+Bearer token) zůstává beze změny jako fallback pro jiného providera —
+pro něj platí, že **žádný konkrétní jiný VIN/vehicle-history provider
+není vybraný ani zapojený**, psaný podle obecného vzoru, ne podle
+konkrétní schémy. Než se TENHLE (obecný, ne-Vincario) použije s
+reálnými penězi:
 
 1. **Vyberte konkrétního poskytovatele** s jasnými ToS, které dovolují
    tenhle use-case (komerční VIN/vehicle-history lookup, zobrazení
@@ -1768,10 +1837,11 @@ tohle použije s reálnými penězi:
 
 | Soubor | Co dělá |
 |---|---|
-| `vinProvider.js` | Factory — `getVinProvider()` vrátí `demo`/`real`/`mock_real` podle `VIN_PROVIDER` |
+| `vinProvider.js` | Factory — `getVinProvider()` vrátí `demo`/`real` (Vincario, nebo fallback na obecný adapter)/`mock_real` podle `VIN_PROVIDER` |
 | `demoVinProvider.js` | **Beze změny** přenesená stará demo logika (`hashVin`/`generateVinResult`) — `POST /vin/check` ji používá napřímo, bez ohledu na `VIN_PROVIDER` |
-| `realVinProviderAdapter.js` | `real` (skutečné HTTP volání s timeoutem) + `mock_real` (simulace stejné parse pipeline, bez sítě) |
-| `vinConfig.js` | Env flagy na jednom místě |
+| `realVinProviderAdapter.js` | Obecný `real` (Bearer token, `VIN_API_BASE_URL`/`VIN_API_KEY`) + `mock_real` (simulace stejné parse pipeline, bez sítě) — fallback, když Vincario není nakonfigurovaný |
+| `vincarioProvider.js` | **Skutečný Vincario adaptér** — control-sum auth, `decode/info` + `decode` fallback, viz „Vincario adapter" níže |
+| `vinConfig.js` | Env flagy na jednom místě (obojí — obecný adapter i Vincario) |
 | `vinNormalizer.js` | Coerce libovolného providerova výstupu do jednotné kanonické schémy |
 | `vinCostLogger.js` | Spustí providera + zaloguje celý lifecycle do `vin_provider_runs` |
 
@@ -1779,11 +1849,135 @@ tohle použije s reálnými penězi:
 
 ```bash
 VIN_PROVIDER=demo    # demo (default) | real | mock_real
-VIN_API_BASE_URL=    # jen pro VIN_PROVIDER=real
-VIN_API_KEY=          # jen pro VIN_PROVIDER=real — nikdy necommitovat
+VIN_API_BASE_URL=    # jen pro VIN_PROVIDER=real, obecný adapter (ne Vincario)
+VIN_API_KEY=          # jen pro VIN_PROVIDER=real, obecný adapter — nikdy necommitovat
 VIN_PROVIDER_TIMEOUT_MS=10000
 VIN_REQUIRE_PAYMENT_FOR_REAL_CHECK=true   # money-safety default, viz níže
+
+# Vincario adaptér — samostatný, nezávislý blok (viz „Vincario adapter" níže)
+VIN_PROVIDER_ENABLED=false
+VIN_PROVIDER_NAME=vincario
+VIN_PROVIDER_BASE_URL=https://api.vincario.com/3.2
+VIN_PROVIDER_API_KEY=       # z Vincario dashboardu — nikdy necommitovat
+VIN_PROVIDER_SECRET_KEY=    # z Vincario dashboardu — nikdy necommitovat
+VIN_PROVIDER_FORMAT=json
 ```
+
+### Vincario adapter (`backend/vin/vincarioProvider.js`)
+
+Zvolí se automaticky místo obecného `real` adaptéru, když `VIN_PROVIDER=real`
+**a** `VIN_PROVIDER_ENABLED=true` **a** oba klíče (`VIN_PROVIDER_API_KEY`,
+`VIN_PROVIDER_SECRET_KEY`) jsou nastavené — jinak se nic nemění a `real`
+dál znamená obecný Bearer-token adaptér jako předtím.
+
+**Autentizace:** `CONTROL_SUM` = prvních 10 hex znaků
+`sha1(VIN + ID + API_KEY + SECRET_KEY)`, kde `ID` je `"info"` pro
+`decode/info`, `"decode"` pro `decode`. VIN se vždy převede na
+UPPERCASE před výpočtem i před voláním.
+
+```
+GET /3.2/{API_KEY}/{CONTROL_SUM}/decode/info/{VIN}.json   ← primárně
+GET /3.2/{API_KEY}/{CONTROL_SUM}/decode/{VIN}.json        ← fallback, pokud decode/info selže
+```
+
+Vincario vrací `{"decode": [{"label": "...", "value": "..."}, ...]}` —
+pole label/value dvojic (make/model/model year/body/fuel type/engine/
+plant country/…), NE pevná jména polí. `parseVincarioResponse()` si z
+nich postaví lookup a naplní `vehicle.{make,model,year,bodyType,
+fuelType,engineDisplacementCcm,enginePowerHp,driveType,plantCountry}` —
+`history`/`accidents`/`owners`/`score` zůstávají prázdné (viz „Honest
+status" výše, proč).
+
+**Chyby nikdy neobsahují klíč/secret/control sum/plnou URL** —
+`safeProviderError()` vrací jen HTTP status + Vincario's vlastní
+`message` pole (např. `"Invalid Control sum"`, `"Invalid VIN"` apod.),
+nic víc. Timeout přes `VIN_PROVIDER_TIMEOUT_MS` (default 10s), bez
+retry.
+
+```bash
+# ověří, že admin je přihlášen a VIN check zaplacený, pak zavolá Vincario
+curl -X POST http://localhost:3001/admin/vin-checks/<ID>/run-provider \
+  -H "x-admin-password: VASE_HESLO"
+```
+
+### Diagnostika trial/plánu — `GET /admin/vin/provider-health`
+
+**Než koupíte placený tarif u Vincario, nejdřív ověřte provider-health,
+balance a jeden decode požadavek** přes tenhle endpoint — zjistí, jestli
+je problém ve špatných klíčích, v trial/plan omezení, v prázdném
+balance, nebo v síti, aniž byste museli platit za vyšší tarif napřed.
+
+Bezpečný diagnostický řetězec (nikdy nespadne, nikdy nevrátí klíč/
+secret/control sum/plnou URL — i Vincario's vlastní chybové hlášky, které
+tyhle hodnoty občas echo-nou zpátky v textu, se před uložením/vrácením
+vždy nahradí `[REDACTED-A]`/`[REDACTED-B]` placeholdery, viz
+`sanitizeProviderMessage()`):
+
+1. **`urlConsistencyCheck`** — čistě lokální kontrola (žádné síťové
+   volání): dokazuje, že normalizovaná base URL (`deriveBases()`) nikdy
+   neobsahuje `/3.2` dvakrát ani žádnou, bez ohledu na to, jestli
+   `VIN_PROVIDER_BASE_URL` v `.env` `/3.2` má nebo ne.
+2. **`balance`** — account-level endpoint BEZ VIN, **jen informativní**
+   (viz níže, proč se nikdy nepoužívá k závěru o credentials).
+3. **`decodeInfo`** — primární, dokumentovaný endpoint na jednom
+   testovacím VIN (default `WVWZZZ1JZXW000010`, nebo `?vin=...`).
+4. **`decodeInfoNoVersion`** — pokud (3) selže: stejný request, ale BEZ
+   `/3.2` v URL vůbec (test hypotézy, že verze nemusí být literální
+   path segment).
+5. **`decodeFallback`** — pokud (3) i (4) selžou: `decode` bez `/info`.
+
+Každý krok je nezávisle try/catch — selhání jednoho nezastaví další.
+**`balance` se nikdy nepoužívá k diagnóze** — jen `decodeInfo`/
+`decodeInfoNoVersion`/`decodeFallback` jsou autoritativní (viz explicitní
+požadavek: 404 na balance sám o sobě nikdy neznamená "invalid
+credentials" — Vincario nemusí `balance` na daném plánu vůbec nabízet).
+
+```bash
+curl -H "x-admin-password: VASE_HESLO" http://localhost:3001/admin/vin/provider-health
+# s vlastním testovacím VINem:
+curl -H "x-admin-password: VASE_HESLO" "http://localhost:3001/admin/vin/provider-health?vin=1C4RJFCM0EC285181"
+# + bezpečný debug trace (attemptedVariantName/method/maskedRoute/status/providerErrorMessage, bez secrets):
+curl -H "x-admin-password: VASE_HESLO" "http://localhost:3001/admin/vin/provider-health?debug=1"
+```
+
+Odpověď obsahuje `vinProviderEnabled`/`vinProviderMode`/`vinProviderName`/
+`vinProviderBaseUrl` (nic z toho není secret), `apiKeyPresent`/
+`apiKeyLength`/`secretKeyPresent`/`secretKeyLength` (délka, nikdy
+hodnota), `urlConsistencyCheck`, výsledek každého kroku
+(`{ok, code, message}` nebo `{ok:true}`), a hlavně `diagnosis` +
+`diagnosisMessage` — plain-language shrnutí, co přesně brání reálnému
+decode:
+
+| `diagnosis` | Co to znamená |
+|---|---|
+| `working` | Reálný decode prošel — klíč/secret/plán fungují právě teď. |
+| `checksum_invalid` | Decode/decode-info route se našla, ale control sum neprošel (`providerChecksumInvalid`) — problém v páru klíč+secret, ne v endpointu/plánu. |
+| `route_not_found` | 404 "route could not be found" na decode/decode-info (`providerEndpointUnavailable`) — request se vůbec nedostal k ověření checksum; **není to nutně credentials problém**, spíš špatná cesta nebo route na daném trial účtu neexistuje. |
+| `product_not_enabled` | Vincario požadavek rozpoznal, ale produkt/service není na tomhle plánu povolený (`providerProductNotEnabled`). |
+| `trial_plan_restricted` | Credentials OK, ale endpoint zamítnut jako mimo plán/trial (`providerPlanLimited`). |
+| `invalid_credentials` | Obecné unauthorized na decode route (`providerUnauthorized`, bez specifické checksum/plan zmínky). |
+| `quota_or_balance_empty` | Nedostatek kreditů/balance (`providerQuotaEmpty`). |
+| `network_error` | Nedostupné `api.vincario.com` vůbec (`providerNetworkError`). |
+| `not_configured` | `VIN_PROVIDER_ENABLED`/klíč/secret chybí. |
+
+Klasifikace chyb (`classifyVincarioError()` v `vincarioProvider.js`) —
+sdílená mezi tímhle diagnostickým endpointem i běžným
+`run-provider`/`POST /vin/check` tokem, vždy na RAW textu **před**
+redakcí (viz `sanitizeProviderMessage()`'s komentář — dřívější verze
+měla bug, kdy placeholder text sám obsahoval slovo „checksum" a falešně
+spouštěl klasifikátor na vlastní redakci; teď se klasifikuje první, pak
+teprve redaguje):
+
+| HTTP/text od Vincario | `error`/`code` |
+|---|---|
+| text o "invalid control sum"/"checksum" | `providerChecksumInvalid` |
+| text o "not enabled"/"access denied to this product/service" | `providerProductNotEnabled` |
+| 404, nebo text "route ... could not be found" | `providerEndpointUnavailable` |
+| 402/429, nebo text o "quota"/"balance"/"credit"/"insufficient" | `providerQuotaEmpty` |
+| 401/403 + "plan"/"upgrade"/"trial"/"not allowed" v textu | `providerPlanLimited` |
+| 401/403 (bez zmínky o plánu) | `providerUnauthorized` |
+| "Invalid VIN" v textu | `invalidVin` |
+| timeout/network chyba | `providerNetworkError` |
 
 ### Demo vs real vs mock_real
 
@@ -1864,10 +2058,11 @@ zobrazení.
 
 ### Cost risks
 
-Skutečný náklad na `real` volání závisí čistě na tom, jakého providera
-a jaký kontrakt admin nakonec zvolí — tenhle kód to nemůže vědět, takže
-`costEstimate` u `real` runů upřímně říká "(unknown)", ne vymyšlené
-číslo. `VIN_REQUIRE_PAYMENT_FOR_REAL_CHECK` je hlavní automatická
+Skutečný náklad na `real` volání (Vincario i obecný adaptér) závisí
+čistě na tom, jaký kredit/kontrakt admin má u zvoleného providera —
+tenhle kód to nemůže vědět, takže `costEstimate` u `real` runů upřímně
+říká "(unknown)", ne vymyšlené číslo. `VIN_REQUIRE_PAYMENT_FOR_REAL_CHECK`
+je hlavní automatická
 ochrana proti utrácení bez příjmu — žádný budgetový strop pořád není,
 ale `POST /admin/vin-checks/:id/run-provider` má od launch-prep
 etapy vlastní rate limit (stejné okno jako ostatní write-endpointy) —
@@ -2239,33 +2434,97 @@ náklady) **nejsou v téhle tabulce odečtené** — nejsou v tomhle kroku
 známé jako konkrétní čísla. Tohle je scenario planning k orientaci, ne
 finanční prognóza — žádné číslo tady není garantovaný příjem.
 
-## GPT API readiness
+## GPT API readiness (real OpenAI provider — implemented)
 
-Config a bezpečnostní gates připravené, **žádné reálné volání OpenAI
-API v tomhle kroku neimplementované** — stejná poctivá pozice jako u
-Stripe/SMTP/VIN provideru jinde v tomhle README.
+**Reálné volání OpenAI API JE implementované** (`backend/ai/aiClient.js`'s
+`openAiProvider`, official `openai` npm SDK) — otestováno v tomhle kroku
+proti skutečnému `api.openai.com` (viz „Jak otestovat" níže), ne jen
+teoreticky. Stejný bezpečnostní rámec jako předtím zůstal beze změny:
 
 - `OPENAI_API_KEY` — poskytuje **výhradně majitel projektu**, žije jen
-  v `backend/.env`, nikdy v kódu, nikdy ve frontendu, nikdy v commitu.
+  v `backend/.env`, nikdy v kódu, nikdy ve frontendu, nikdy v commitu,
+  nikdy v logu (jen `present: yes/no`, viz startup log a
+  `GET /admin/ai/health`).
 - `AI_ENABLED=false` (default) — AI endpoints vrátí `503 AI_DISABLED`,
   nic se nezkouší volat.
 - `AI_MONTHLY_BUDGET_LIMIT=0` (default) — **druhý, nezávislý gate** na
   `OPENAI_API_KEY`. I s platným klíčem zůstává `AI_PROVIDER=openai`
   "not configured", dokud admin vědomě nenastaví kladný měsíční
-  rozpočet. Obě podmínky musí platit zároveň.
-- I s oběma nastavenými zůstává reálné volání nerealizované v tomhle
-  kroku (jen mock provider skutečně běží) — chyba je vždy jasná
-  `PROVIDER_NOT_CONFIGURED`, backend nikdy nespadne.
-- Každý AI výstup vyžaduje human review (viz «AI orchestrator
-  foundation» výše) — tahle podmínka se týká i budoucích 16 agentů
-  níže, ne jen těch, co už běží.
+  rozpočet. Obě podmínky musí platit zároveň — toto číslo je čistě
+  informativní gate, **nesčítá skutečné utracené peníze** (žádné
+  live-metering v tomhle kroku — sledujte skutečné útraty v OpenAI
+  dashboardu).
+- `AI_MODEL`/`OPENAI_MODEL` (default `gpt-4.1-mini`), `AI_TEMPERATURE`
+  (default `0.2`), `AI_MAX_OUTPUT_TOKENS` (default `1200`) — ladění
+  reálného volání, bezpečné výchozí hodnoty.
+- Žádné automatické retry — jeden pokus, `30s` timeout, pak jasná chyba
+  (401/429/`insufficient_quota`/timeout/…, viz níže), nikdy tichá smyčka.
+- Každý AI výstup **pořád** vyžaduje human review (viz «AI orchestrator
+  foundation» výše) — tahle podmínka se týká úplně stejně reálného i
+  mock provideru, bez výjimky.
 
-### Architektura 16 agentů (9 implementováno, 7 plánováno)
+### Jak zapnout
+
+```bash
+# backend/.env
+OPENAI_API_KEY=sk-proj-...        # z platformy OpenAI, nikdy necommitovat
+AI_PROVIDER=openai
+AI_ENABLED=true
+AI_MONTHLY_BUDGET_LIMIT=20         # jakékoliv kladné číslo — jen gate, nesčítá útraty
+```
+
+### Jak otestovat
+
+```bash
+# 1) AI health — bez klíče v odpovědi, jen stav
+curl -H "x-admin-password: VASE_HESLO" http://localhost:3001/admin/ai/health
+
+# 2) testovací běh (report-kind agent, entityType vin_check s ručním inputem)
+curl -X POST http://localhost:3001/admin/ai/run \
+  -H "Content-Type: application/json" -H "x-admin-password: VASE_HESLO" \
+  -d '{"agentName":"vin_risk_explanation","entityType":"vin_check","entityId":"vincheck_xxx",
+       "input":{"vinCheck":{"vin":"...","riskLevel":"high","score":37,"accidents":2,"owners":2,"odometerRisk":"medium","isDemoResult":true}}}'
+
+# 3) testovací běh (business-kind agent, agregát bez PII)
+curl -X POST http://localhost:3001/admin/agents/run-business-agent \
+  -H "Content-Type: application/json" -H "x-admin-password: VASE_HESLO" \
+  -d '{"agentName":"admin_operations","entityType":"dashboard","entityId":"today"}'
+```
+
+### Jak vypnout / vrátit se k mock provideru
+
+```bash
+AI_PROVIDER=mock   # nebo AI_ENABLED=false úplně vypne AI endpointy
+```
+Nic jiného měnit netřeba — `backend/ai/aiClient.js`'s `mockAiProvider`
+zůstal beze změny, deterministický, zdarma, offline.
+
+### Chybové stavy (`openAiProvider`, nikdy nekonečný retry)
+
+| Situace | Co backend vrátí |
+|---|---|
+| `OPENAI_API_KEY` chybí nebo `AI_MONTHLY_BUDGET_LIMIT<=0` | `503 PROVIDER_NOT_CONFIGURED`, jasně říká který ze dvou gate chybí |
+| Neplatný klíč (401) | `502 PROVIDER_ERROR`: "OpenAI rejected the API key (401 Unauthorized)…" |
+| `insufficient_quota` | `502 PROVIDER_ERROR`: "OpenAI reports insufficient quota/billing…" |
+| Rate limit (429) | `502 PROVIDER_ERROR`: "OpenAI rate-limited this request…" |
+| Timeout (30s) | `502 PROVIDER_ERROR`: "OpenAI request timed out after 30000ms." |
+| Model nevrátil validní JSON / neodpovídá schématu | `400 INVALID_OUTPUT` |
+
+### Rizika nákladů
+
+`estimatedCost` u `openai` runů je **odhad podle veřejného ceníku**
+(`OPENAI_PRICE_PER_1M_TOKENS_USD` v `aiClient.js`), NE skutečná faktura
+— ceny se mění, účty mají různé tiery/slevy. Pro neznámý model vrací
+upřímně "(unknown)". Skutečné útraty sledujte v OpenAI dashboardu;
+`AI_MONTHLY_BUDGET_LIMIT` je jen gate, nezastaví utrácení samo o sobě
+uprostřed měsíce.
+
+### Architektura 19 agentů (14 implementováno, 5 plánováno)
 
 | # | Agent | Stav | Poznámka |
 |---|---|---|---|
 | — | AI Orchestrator | ✅ implementován | základní infrastruktura, ne samostatný agent |
-| 1 | VIN Risk Agent | ✅ `vin_risk_explanation` | wave 1 |
+| 1 | VIN Report Agent | ✅ `vin_risk_explanation` | wave 1 |
 | 2 | Listing Analysis Agent | ✅ `listing_analysis` | wave 1 |
 | 3 | Buyer Advisor Agent | ✅ `buyer_advisor` | wave 1 |
 | 4 | Price & Negotiation Agent | ⏳ plánován | rozšíření buyer_advisor o cenová jednání |
@@ -2276,17 +2535,22 @@ Stripe/SMTP/VIN provideru jinde v tomhle README.
 | 9 | Dealer Trust Agent | ⏳ plánován | hodnocení důvěryhodnosti dealera |
 | 10 | B2B Sales Agent | ✅ `b2b_sales` | wave 2 |
 | 11 | Inspector Network Agent | ⏳ plánován | párování/správa sítě techniků |
-| 12 | Support Agent | ✅ `support` | wave 2 |
+| 12 | Email Support Agent | ✅ `support` | wave 2, nyní i entityType `email_log` |
 | 13 | CRM Follow-up Agent | ✅ `crm_follow_up` | wave 2 |
-| 14 | Fraud & Abuse Agent | ⏳ plánován | detekce podezřelé aktivity |
-| 15 | Business Analyst Agent | ⏳ plánován | agregovaná byznys analýza napříč daty |
-| 16 | Operations/Payment Assistant | ✅ `operations_payment` | wave 2 (ekvivalent bodu z původního zadání) |
+| 14 | Payment Control Agent | ✅ `operations_payment` | wave 2 |
+| 15 | Lead Qualification Agent | ✅ `lead_qualification` | wave 3 |
+| 16 | Booking Coordinator Agent | ✅ `booking_coordinator_agent` | wave 3 |
+| 17 | Admin Operations Agent | ✅ `admin_operations` | wave 3 |
+| 18 | Revenue Share Agent | ✅ `revenue_share_agent` | wave 3, viz «Revenue-share 20%» |
+| 19 | Business Growth Agent | ✅ `business_growth` | wave 3 |
 
-Neměnná pravidla pro **všech** 16, implementovaných i plánovaných (viz
-«AI agents — wave 2» výše pro plné znění): žádné automatické odeslání
+Neměnná pravidla pro **všech** implementovaných i plánovaných (viz «AI
+agents — wave 2/3» výše pro plné znění): žádné automatické odeslání
 klientovi, žádné finanční operace, žádná změna payment statusu, žádný
 slib 100% přesnosti, vždy jen návrh/report/task pro člověka — finální
-akci vždy potvrzuje člověk.
+akci vždy potvrzuje člověk. Plný katalog s `allowedActions`/
+`forbiddenActions`/`systemPrompt`/`riskLevel` je vidět v
+`GET /admin/ai/agents` a na `admin-ai-runs.html`.
 
 ## Production deployment
 
@@ -2758,8 +3022,8 @@ provider/inspector/dealer workflow — этот раздел его дополн
 | **SQLite — один процесс** | Средняя (при росте нагрузки) | При нескольких backend-процессах/серверах — рассинхрон данных, возможна потеря записей | Смотреть `NODE_ENV`/деплой — работает ли больше одного процесса backend'а одновременно на одном `data/overeno.sqlite` | Один процесс backend на деплой (см. «Известные ограничения»); при реальном росте — миграция на PostgreSQL |
 | **Admin — общий пароль, не полноценная auth** | Высокая (со временем) | Утечка пароля = полный доступ ко всем данным, без возможности отозвать доступ одному человеку, не всем | Проверить, кто знает `ADMIN_PASSWORD` и как он передаётся/хранится | Длинный случайный пароль, ротация при увольнении/подозрении в утечке, HTTPS всегда (пароль идёт в заголовке) |
 | **Stripe live не проверен** | Высокая (если включить live без теста) | Реальные платежи могут не пройти/не записаться корректно — `stripeProvider.js` reviewed-but-unverified | Полный цикл checkout→webhook в **test mode** до единого live-ключа | Обязательно test mode сначала (см. «Production checklist» выше), не пропускать |
-| **VIN provider — cost/API риск** | Низкая (пока `VIN_PROVIDER=demo`/`mock_real`) | Реальный provider может стоить денег за каждый вызов; конкретный provider не выбран и не протестирован | `VIN_PROVIDER` в `.env`, смотреть `vin_provider_runs.costEstimate` | `VIN_REQUIRE_PAYMENT_FOR_REAL_CHECK=true` (default), rate limit на `run-provider` (добавлено на этом этапе), выбрать provider с чёткими ToS перед `VIN_PROVIDER=real` |
-| **AI hallucination** | Средняя (когда подключится реальный provider) | AI-вывод может содержать неточности/выдумки — сейчас это невозможно (только `mock`), но станет реальным риском с реальной моделью | Смотреть `AI_PROVIDER` — пока только `mock` реализован | Human review обязателен для каждого run (не отключается), apply-to-report — только после approve, никогда не отправляется клиенту напрямую |
+| **VIN provider (Vincario) — cost/API риск** | Средняя (если `VIN_PROVIDER=real` включён с рабочими ключами) | Реальный вызов Vincario стоит кредитов за каждый запрос; `costEstimate` честно "(unknown)" — код не знает реальный тариф аккаунта | `VIN_PROVIDER`/`VIN_PROVIDER_ENABLED` в `.env`, смотреть `vin_provider_runs.costEstimate` | `VIN_REQUIRE_PAYMENT_FOR_REAL_CHECK=true` (default), rate limit на `run-provider`, `VIN_PROVIDER_ENABLED=false` — мгновенный откат на demo |
+| **AI (OpenAI) hallucination / стоимость** | Средняя (`AI_PROVIDER=openai` реализован и протестирован) | AI-вывод может содержать неточности/выдумки; `AI_MONTHLY_BUDGET_LIMIT` — только gate, не лимит фактических трат (см. «Известные ограничения») | Смотреть `GET /admin/ai/health`, реальные траты — только в OpenAI dashboard | Human review обязателен для каждого run (не отключается), apply-to-report — только после approve; `AI_MONTHLY_BUDGET_LIMIT=0` мгновенно блокирует реальные вызовы |
 | **Email deliverability** | Средняя | Письма могут попадать в спам/не доходить — `emailService.js` не проверялся на реальном SMTP-провайдере | `admin-email-logs.html` — смотреть статус каждой попытки | Тестовый SMTP (Mailtrap/аналог) перед реальным провайдером, SPF/DKIM на домене отправителя, мониторинг `email_logs` |
 | **Утечка public token/badge code** | Низкая | Report token/badge code, если он попал не в те руки, даёт доступ к конкретной записи (не ко всей системе) | Report token — 64 hex символа, revocable; badge code — 10 символов, публично-делимый по дизайну | Report: «Revoke» на `admin-reports.html` при подозрении на утечку; badge: revoke на `admin-badges.html`. Ни то ни другое не даёт доступа к чему-либо ещё |
 | **Backup failure** | Средняя (если забыть настроить) | Единственная копия данных — `backend/data/overeno.sqlite`; без backup потеря файла = потеря всех данных | `npm run backup:sqlite` вручную, проверить, что `backend/backups/` реально растёт | Cron на `npm run backup:sqlite` (ежедневно минимум), хранить backup **вне** того же диска/сервера |
@@ -2786,25 +3050,38 @@ provider/inspector/dealer workflow — этот раздел его дополн
   просто не уходят.
 - `PAYMENTS_ENABLED=false` / `PAYMENT_PROVIDER=mock` — можно собирать
   лиды/бронирования без реальных платежей.
-- `AI_ENABLED=false` — весь AI-функционал (wave 1 + wave 2) выключен,
+- `AI_ENABLED=false` — весь AI-функционал (wave 1 + wave 2/3) выключен,
   ничего не ломается.
-- `VIN_PROVIDER=demo` — единственный режим, который вообще
-  протестирован «по-настоящему» (детерминированный demo). Остаётся
-  безопасным выбором даже на реальном запуске, если честность demo-
-  статуса перед клиентом это устраивает.
+- `VIN_PROVIDER=demo` — единственный режим, который использует
+  **публичная** форма (`POST /vin/check`), независимо от этой
+  переменной. Остаётся безопасным выбором даже на реальном запуске,
+  если честность demo-статуса перед клиентом это устраивает.
+
+**Теперь реально реализовано (протестировано против живых API в этом
+шаге — см. «Vincario adapter» и «GPT API readiness» выше для деталей,
+ошибок и как включить):**
+- `VIN_PROVIDER=real` + `VIN_PROVIDER_ENABLED=true` + Vincario-ключи —
+  реальный вызов `api.vincario.com` (только через admin-only
+  `run-provider`, никогда из публичной формы, и только для оплаченного
+  `vin_check`, если `VIN_REQUIRE_PAYMENT_FOR_REAL_CHECK=true`). Vincario
+  отдаёт только технические характеристики (марка/модель/год/двигатель),
+  не историю ДТП/пробега — это отдельный платный продукт Vincario, тут
+  не вызывается.
+- `AI_PROVIDER=openai` + `OPENAI_API_KEY` + `AI_MONTHLY_BUDGET_LIMIT>0` —
+  реальный вызов `api.openai.com`. `anthropic` (или другое имя)
+  по-прежнему просто вернёт `PROVIDER_NOT_CONFIGURED`, ничего не
+  сломает.
 
 **Категорически запрещено в production без полного отдельного теста:**
 - `PAYMENT_PROVIDER=stripe` с `sk_live_...` **до** полного прохода
   test mode целиком (checkout→webhook→запись в БД→email) — см.
   Production checklist.
-- `VIN_PROVIDER=real` **без** выбранного конкретного provider с
-  проверенными ToS и протестированного на их sandbox (если есть) — см.
-  «Real VIN provider adapter» выше. Сейчас в проекте не выбрано ни
-  одного.
-- `AI_PROVIDER=openai`/`anthropic` — не реализовано в этом проекте
-  вообще (только `mock` реально работает); выбор этих значений сейчас
-  просто вернёт `PROVIDER_NOT_CONFIGURED`, ничего не сломает, но и не
-  заработает.
+- `VIN_PROVIDER=real` с настоящими Vincario-ключами **до** проверки их
+  ToS (кэширование/хранение `vin_provider_runs.responseJson`) для вашего
+  конкретного тарифа/использования — см. «Vincario adapter» выше.
+- `AI_PROVIDER=openai` без реалистичного `AI_MONTHLY_BUDGET_LIMIT` и без
+  мониторинга реальных трат в OpenAI dashboard — это число тут только
+  gate, не лимит фактических трат.
 - Любой `ADMIN_PASSWORD`, который используется где-то ещё (переиспользование
   паролей) — это единственный ключ ко всем данным системы.
 
@@ -2880,6 +3157,18 @@ checkout'ы идут через mock.
   автомобиле.
 - У VIN-проверок есть только `PATCH .../note` (внутренняя заметка) —
   ни смены статуса, ни DELETE по-прежнему нет, осознанно.
+- **Vincario (реальный VIN provider) отдаёт только технические
+  характеристики** (марка/модель/год/двигатель/…), не историю ДТП,
+  пробег или владельцев — это отдельный платный VHR-продукт Vincario,
+  который тут не вызывается. Ключи из `.env.txt`, с которыми это
+  тестировалось, Vincario отклонил как `Invalid Control sum` на трёх
+  разных реальных VIN — похоже на пример-заглушку из документации, не
+  на реальный оплаченный аккаунт; нужен свой ключ из Vincario dashboard.
+- **`AI_MONTHLY_BUDGET_LIMIT` — это только gate, не счётчик фактических
+  трат.** Ничего в этом коде не суммирует реальные OpenAI-расходы за
+  месяц и не останавливает вызовы при их превышении — только сам
+  OpenAI-аккаунт (свои usage limits в OpenAI dashboard) может это
+  ограничить по-настоящему.
 - **Найдено на launch-prep этапе**: `GET /admin/agents` не имеет
   `/export.csv` — единственная admin-таблица из 13 без CSV-экспорта.
   Не критично (agents — маленький внутренний справочник, не растущий

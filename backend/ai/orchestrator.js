@@ -139,7 +139,8 @@ export async function runAgent({ agentName, entityType, entityId, input }) {
     return updateAiRunResult(run.id, {
       status: 'completed',
       outputJson: JSON.stringify(result.output),
-      estimatedCost: result.estimatedCost
+      estimatedCost: result.estimatedCost,
+      model: result.model
     });
   } catch (err) {
     updateAiRunResult(run.id, { status: 'failed', errorMessage: err.message });

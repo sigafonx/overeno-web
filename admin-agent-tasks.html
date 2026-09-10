@@ -43,10 +43,12 @@
 
 <main class="admin-main">
   <div class="demo-warning">
-    Business agenti (CRM Follow-up, B2B Sales, Support, Operations/Payment
-    Assistant) jen <strong>navrhují</strong> — negenerují a neposílají nic
-    automaticky, nemění stav žádné platby/leadu/objednávky, nic nemažou.
-    Každý návrh je jeden řádek tady, se stavem
+    Business agenti (CRM Follow-up, B2B Sales, Email Support, Payment
+    Control, Lead Qualification, Booking Coordinator, Admin Operations,
+    Revenue Share, Business Growth) jen <strong>navrhují</strong> —
+    negenerují a neposílají nic automaticky, nemění stav žádné platby/
+    leadu/objednávky, nic nemažou, nepřevádí žádné peníze. Každý návrh je
+    jeden řádek tady, se stavem
     <code>open → reviewed → completed/dismissed</code>, který nastavuje
     výhradně admin ručně.
   </div>
@@ -59,6 +61,11 @@
         <option value="b2b_sales">b2b_sales</option>
         <option value="support">support</option>
         <option value="operations_payment">operations_payment</option>
+        <option value="lead_qualification">lead_qualification</option>
+        <option value="booking_coordinator_agent">booking_coordinator_agent</option>
+        <option value="admin_operations">admin_operations</option>
+        <option value="revenue_share_agent">revenue_share_agent</option>
+        <option value="business_growth">business_growth</option>
       </select>
       <select id="filterStatus">
         <option value="">Vše — stav</option>
@@ -73,6 +80,9 @@
         <option value="booking">booking</option>
         <option value="vin_check">vin_check</option>
         <option value="payment">payment</option>
+        <option value="email_log">email_log</option>
+        <option value="dashboard">dashboard</option>
+        <option value="revenue_share">revenue_share</option>
       </select>
       <input type="search" id="filterSearch" placeholder="Hledat ID, entitu, titulek…">
     </div>
@@ -82,8 +92,8 @@
     </div>
   </div>
 
-  <!-- Ad-hoc run panel — lets any of the 4 business agents run against
-       any entity, not just the 3 with dedicated buttons elsewhere. -->
+  <!-- Ad-hoc run panel — lets any of the 9 business agents run against
+       any entity, not just the ones with dedicated buttons elsewhere. -->
   <div class="admin-table-wrap" style="padding:16px 18px;margin-bottom:20px;">
     <h3 style="margin:0 0 12px;font-size:1rem;">Spustit business agenta ručně</h3>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
@@ -92,8 +102,13 @@
         <select id="runAgentSelect">
           <option value="crm_follow_up">crm_follow_up (lead, booking)</option>
           <option value="b2b_sales">b2b_sales (lead)</option>
-          <option value="support">support (lead, booking, vin_check, payment)</option>
+          <option value="support">support (lead, booking, vin_check, payment, email_log)</option>
           <option value="operations_payment">operations_payment (payment)</option>
+          <option value="lead_qualification">lead_qualification (lead)</option>
+          <option value="booking_coordinator_agent">booking_coordinator_agent (booking)</option>
+          <option value="admin_operations">admin_operations (dashboard)</option>
+          <option value="revenue_share_agent">revenue_share_agent (revenue_share)</option>
+          <option value="business_growth">business_growth (dashboard)</option>
         </select>
       </div>
       <div class="modal-field" style="margin-bottom:0;min-width:140px;">
@@ -103,14 +118,23 @@
           <option value="booking">booking</option>
           <option value="vin_check">vin_check</option>
           <option value="payment">payment</option>
+          <option value="email_log">email_log</option>
+          <option value="dashboard">dashboard</option>
+          <option value="revenue_share">revenue_share</option>
         </select>
       </div>
       <div class="modal-field" style="margin-bottom:0;min-width:200px;">
         <label for="runEntityId">ID entity</label>
-        <input type="text" id="runEntityId" placeholder="lead_xxxxxxxxxxxx">
+        <input type="text" id="runEntityId" placeholder="lead_xxxxxxxxxxxx / today / 2026-09">
       </div>
       <button type="button" class="btn btn-brass" id="runAgentBtn">Spustit</button>
     </div>
+    <p style="font-size:0.78rem;color:var(--text-muted-dark);margin:8px 0 0;">
+      Pro <code>dashboard</code> stačí libovolné ID entity (např. „today") —
+      počítají se jen agregované počty, žádné konkrétní záznamy. Pro
+      <code>revenue_share</code> zadejte měsíc ve formátu <code>YYYY-MM</code>
+      (např. „2026-09").
+    </p>
     <p class="form-status" id="runAgentMsg"></p>
   </div>
 

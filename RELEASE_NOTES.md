@@ -53,9 +53,20 @@ Twelve build stages, each shipped as a working, tested increment:
     with a double admin gate (dealer must be verified, badge approval
     is always a separate explicit action); public `badge.html?code=...`
     page shows only safe fields.
-13. **Production launch preparation** (this stage) — full system audit,
-    production risk matrix, expanded smoke checklist, launch mode
-    config, rollback plan, this document.
+13. **Production launch preparation** — full system audit, production
+    risk matrix, expanded smoke checklist, launch mode config, rollback
+    plan, this document.
+14. **Real Vincario VIN provider + real OpenAI provider + 5 more AI
+    agents** (this stage) — `backend/vin/vincarioProvider.js` (control-
+    sum auth, `decode/info`+`decode`, tested against the real Vincario
+    API); `backend/ai/aiClient.js`'s `openAiProvider` (official `openai`
+    SDK, tested against the real OpenAI API); 5 new business agents
+    (`lead_qualification`, `booking_coordinator_agent`,
+    `admin_operations`, `revenue_share_agent`, `business_growth`) on top
+    of the existing 9, for 14 total; `GET /admin/ai/health` +
+    `GET /admin/ai/agents` (full catalog with allowed/forbidden actions,
+    risk level, system prompt) surfaced on `admin-ai-runs.html`. No
+    contract changes to any existing endpoint or page.
 
 See `backend/README.md` for the full technical detail behind every one
 of these — this document is a summary, not a replacement for it.
@@ -76,14 +87,22 @@ new "Production risk matrix" section for the full picture):
   carefully, but never run against a real Stripe account in this
   environment (no network access here). Test mode end-to-end before
   trusting it.
-- **No real VIN provider is selected or wired up.** `VIN_PROVIDER=real`
-  exists as an interface, but `realVinProviderAdapter.js`'s field
-  parsing is a generic best-effort guess, not built against any
-  specific provider's actual documented schema.
-- **Only the `mock` AI provider is implemented.** `AI_PROVIDER=openai`/
-  `anthropic` are accepted values that don't crash the backend, but
-  return `PROVIDER_NOT_CONFIGURED` — no real model has been called in
-  this project.
+- **Vincario (real VIN provider) is wired up and tested**, but only
+  returns technical vehicle specs (make/model/year/engine/…) — not
+  accident/mileage/owner history, which is a separate paid Vincario
+  product not called here. The example key pair this was tested with
+  (`0e84bc0986a5`/`7f2d5614db`) was rejected by Vincario as an invalid
+  control sum on three different real VINs — looks like a documentation
+  example, not a working paid account; a real key from the Vincario
+  dashboard is needed to see real vehicle data. The older, generic
+  `realVinProviderAdapter.js` (Bearer token, unrelated to Vincario)
+  remains an untested fallback for a different provider.
+- **`AI_PROVIDER=openai` is implemented and tested** against the real
+  OpenAI API (official `openai` SDK). `anthropic` (or any other name)
+  is still just accepted without crashing, returning
+  `PROVIDER_NOT_CONFIGURED`. `AI_MONTHLY_BUDGET_LIMIT` is a gate, not a
+  spend meter — nothing in this codebase tracks cumulative real OpenAI
+  cost; monitor actual usage in the OpenAI dashboard.
 - **No technician/dealer login.** Both the inspector and dealer
   workflows are entirely admin-managed; neither role has an account.
 - **No automatic payouts anywhere** — inspector and dealer workflows

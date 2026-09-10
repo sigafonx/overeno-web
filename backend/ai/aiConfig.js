@@ -44,3 +44,21 @@ export const AI_MONTHLY_BUDGET_LIMIT = Number.isFinite(parseFloat(process.env.AI
 // returns it in any API response, and nothing outside aiClient.js ever
 // sees it.
 
+// --- Real OpenAI provider tuning (see aiClient.js's openAiProvider) -----
+// Both have safe, conservative defaults — an admin never has to set
+// these for AI_PROVIDER=openai to work, only to tune it.
+
+// Low by design: these agents draft structured JSON for a human to
+// review, not creative prose — a low temperature keeps output closer to
+// "follow the input/schema" and further from inventing detail.
+export const AI_TEMPERATURE = Number.isFinite(parseFloat(process.env.AI_TEMPERATURE))
+  ? parseFloat(process.env.AI_TEMPERATURE)
+  : 0.2;
+
+// Hard cap on the model's own output length (tokens) per run — a second,
+// independent cost/latency control alongside AI_MAX_INPUT_CHARS above,
+// this time bounding the OUTPUT side instead of the input side.
+export const AI_MAX_OUTPUT_TOKENS = Number.isFinite(parseInt(process.env.AI_MAX_OUTPUT_TOKENS, 10))
+  ? parseInt(process.env.AI_MAX_OUTPUT_TOKENS, 10)
+  : 1200;
+

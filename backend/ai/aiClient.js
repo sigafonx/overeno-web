@@ -1,5 +1,6 @@
 import crypto from 'crypto';
-import { AI_PROVIDER_NAME, AI_MODEL, AI_MONTHLY_BUDGET_LIMIT } from './aiConfig.js';
+import OpenAI from 'openai';
+import { AI_PROVIDER_NAME, AI_MODEL, AI_MONTHLY_BUDGET_LIMIT, AI_TEMPERATURE, AI_MAX_OUTPUT_TOKENS, OPENAI_MODEL } from './aiConfig.js';
 
 // ---------------------------------------------------------------------------
 // Provider interface every provider below must implement:
@@ -300,6 +301,120 @@ function mockOperationsPayment(input, hash) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Wave 3 — 5 additional business agents rounding out the 8-role business
+// catalog (Lead Qualification / VIN Report [=vin_risk_explanation] /
+// Booking Coordinator / Payment Control [=operations_payment] / Email
+// Support [=support, extended to entityType "email_log"] / Admin
+// Operations / Revenue Share / Business Growth). Same determinism and
+// safety contract as wave 2 above — draft suggestions only, never an
+// automatic action, never a guaranteed outcome.
+// ---------------------------------------------------------------------------
+
+function mockLeadQualification(input, hash) {
+  const lead = input.lead || {};
+  const missing = [];
+  if (!lead.contactName) missing.push('contact name');
+  if (!lead.city) missing.push('city');
+  if (!lead.message) missing.push('a message describing what they need');
+  if (lead.type === 'dealer_request' && !lead.companyName) missing.push('company name');
+
+  const daysOld = lead.createdAt ? Math.max(0, Math.floor((Date.now() - new Date(lead.createdAt).getTime()) / 86400000)) : null;
+  const urgency = daysOld === null ? 'unknown' : daysOld >= 3 ? 'high' : daysOld >= 1 ? 'medium' : 'low';
+
+  const nextStep = missing.length > 0
+    ? `Ask for the missing information (${missing.join(', ')}) before qualifying further.`
+    : lead.qualification
+      ? `Input already marks qualification as "${lead.qualification}" — confirm this is still accurate, then move to the next step for that qualification.`
+      : 'Enough basic information is present — an admin should manually assess fit and decide the next step (contact, quote, decline).';
+
+  return {
+    tasks: [{
+      taskType: 'lead_qualification_review',
+      title: 'Review lead qualification and urgency',
+      description: `Mock qualification analysis: urgency "${urgency}"${daysOld !== null ? ` (${daysOld} day(s) since created)` : ''}. ${missing.length > 0 ? `Missing: ${missing.join(', ')}.` : 'No obvious data gaps found in the input.'}`,
+      suggestedAction: nextStep,
+      suggestedMessage: missing.length > 0
+        ? `Hi ${lead.contactName || 'there'}, thanks for reaching out — could you share ${missing.join(' and ')} so we can help you faster? [DRAFT — mock provider output]`
+        : null
+    }]
+  };
+}
+
+function mockBookingCoordinator(input, hash) {
+  const booking = input.booking || {};
+  const checklist = [
+    `Confirm preferred slot "${booking.preferredSlot || 'not specified'}" is still available.`,
+    `Confirm inspection location covers city "${booking.city || 'not specified'}".`,
+    booking.vin ? `VIN ${booking.vin} provided — cross-check against any linked VIN check before the visit.` : 'No VIN provided — ask for one before the inspection if possible.',
+    booking.listingUrl ? 'Listing URL provided — inspector should review it before arriving.' : 'No listing URL provided — nothing to pre-review.'
+  ];
+
+  return {
+    tasks: [{
+      taskType: 'inspection_checklist',
+      title: 'Prepare inspector assignment checklist',
+      description: `Mock booking-coordinator analysis for status "${booking.status || 'unknown'}". Checklist:\n- ${checklist.join('\n- ')}`,
+      suggestedAction: 'Assign an inspector via admin-inspection-jobs.html once the checklist above is confirmed — this suggestion does not assign anyone itself.',
+      suggestedMessage: null
+    }]
+  };
+}
+
+function mockAdminOperations(input, hash) {
+  const d = input.dashboard || {};
+  const attention = [];
+  if ((d.newLeadsCount || 0) > 0) attention.push(`${d.newLeadsCount} new lead(s)`);
+  if ((d.bookingsNeedingActionCount || 0) > 0) attention.push(`${d.bookingsNeedingActionCount} booking(s) needing action`);
+  if ((d.failedPaymentsCount || 0) > 0) attention.push(`${d.failedPaymentsCount} failed payment(s)`);
+  if ((d.failedEmailsCount || 0) > 0) attention.push(`${d.failedEmailsCount} failed email(s)`);
+  if (attention.length === 0) attention.push('nothing flagged in the counts provided');
+
+  return {
+    tasks: [{
+      taskType: 'daily_summary',
+      title: 'Daily operations summary',
+      description: `Mock cross-entity summary (counts only, no PII): ${attention.join('; ')}. Window: ${d.windowDays || 7} day(s).`,
+      suggestedAction: 'Review the flagged categories in their own admin pages (leads/bookings/payments/email logs) — this summary does not change any record.',
+      suggestedMessage: null
+    }]
+  };
+}
+
+function mockRevenueShareAgent(input, hash) {
+  const rs = input.revenueShare || {};
+  const currency = rs.currency ? ` ${rs.currency}` : '';
+  return {
+    tasks: [{
+      taskType: 'revenue_share_summary',
+      title: `Revenue-share summary for ${rs.monthKey || 'this month'}`,
+      description: `Mock transparent calculation: gross paid revenue ${rs.grossRevenue ?? 'n/a'}${currency}, share ${rs.sharePercent ?? 20}% = ${rs.shareAmount ?? 'n/a'}${currency}. Based on ${rs.ledgerEntryCount ?? 0} accrued ledger entr(y/ies). Payout due ${rs.payoutDueAt || 'not yet calculated'}, status "${rs.payoutStatus || 'not yet calculated'}".`,
+      suggestedAction: 'This is a read-only summary of the existing revenue-share ledger/payout records — no transfer, deduction, or status change happens here. Use admin-revenue-share.html to calculate/mark payouts.',
+      suggestedMessage: null
+    }]
+  };
+}
+
+function mockBusinessGrowth(input, hash) {
+  const d = input.dashboard || {};
+  const rs = input.revenueShare || {};
+  const ideas = pickFromHash(hash, 0, [
+    ['Review pricing/positioning for the product with the most cancelled/failed payments.', 'Consider a short follow-up sequence for leads older than 3 days with no contact yet.'],
+    ['Check whether VIN checks with high risk scores convert to inspection bookings at a different rate than low-risk ones.', 'Look at which lead source (source field) produces the most qualified leads.'],
+    ['Consider a lightweight reminder for bookings stuck in "waiting_payment" for more than a few days.', 'Review dealer/partner leads specifically — b2b_sales tasks may be going stale.']
+  ]);
+
+  return {
+    tasks: [{
+      taskType: 'growth_scenario',
+      title: 'Growth/conversion suggestions (scenarios, not guarantees)',
+      description: `Mock scenario-based suggestions from available aggregate data (revenue this month: ${rs.grossRevenue ?? 'n/a'} ${rs.currency || ''}). These are hypotheses to test, not guaranteed outcomes — no forecast here is a promise of future revenue.`,
+      suggestedAction: ideas.join(' '),
+      suggestedMessage: null
+    }]
+  };
+}
+
 const MOCK_GENERATORS = {
   listing_analysis: mockListingAnalysis,
   risk_scoring: mockRiskScoring,
@@ -309,7 +424,12 @@ const MOCK_GENERATORS = {
   crm_follow_up: mockCrmFollowUp,
   b2b_sales: mockB2bSales,
   support: mockSupport,
-  operations_payment: mockOperationsPayment
+  operations_payment: mockOperationsPayment,
+  lead_qualification: mockLeadQualification,
+  booking_coordinator_agent: mockBookingCoordinator,
+  admin_operations: mockAdminOperations,
+  revenue_share_agent: mockRevenueShareAgent,
+  business_growth: mockBusinessGrowth
 };
 
 /**
@@ -342,34 +462,133 @@ const mockAiProvider = {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Real OpenAI provider — the only real (non-mock) provider actually
+// implemented here. Uses the official `openai` npm SDK. Gated by TWO
+// independent conditions, same money-safety pattern as everywhere else
+// in this codebase (see VIN_REQUIRE_PAYMENT_FOR_REAL_CHECK,
+// PAYMENTS_ENABLED, etc.): a real OPENAI_API_KEY must be set, AND
+// AI_MONTHLY_BUDGET_LIMIT must be a positive number an admin deliberately
+// set. Neither alone is enough. No retries — one attempt, then either a
+// result or a clear, specific error; never an infinite/silent retry loop.
+// ---------------------------------------------------------------------------
+
+const OPENAI_REQUEST_TIMEOUT_MS = 30000;
+
+// Rough, clearly-labeled LIST-PRICE estimate for the admin UI — not a
+// real invoice figure (actual billing depends on the OpenAI account's
+// own rate/tier and can change over time). Unknown models fall back to
+// an honest "(unknown)" rather than a guessed number.
+const OPENAI_PRICE_PER_1M_TOKENS_USD = {
+  'gpt-4.1-mini': { input: 0.40, output: 1.60 },
+  'gpt-4.1': { input: 2.00, output: 8.00 },
+  'gpt-4o-mini': { input: 0.15, output: 0.60 },
+  'gpt-4o': { input: 2.50, output: 10.00 }
+};
+
+function findPriceTableEntry(model) {
+  if (OPENAI_PRICE_PER_1M_TOKENS_USD[model]) return OPENAI_PRICE_PER_1M_TOKENS_USD[model];
+  // OpenAI often returns a dated/versioned model string (e.g.
+  // "gpt-4.1-mini-2025-04-14") even when the request asked for the
+  // unversioned alias — match by prefix so the price table still applies.
+  const key = Object.keys(OPENAI_PRICE_PER_1M_TOKENS_USD).find((k) => model && model.startsWith(k));
+  return key ? OPENAI_PRICE_PER_1M_TOKENS_USD[key] : null;
+}
+
+function estimateOpenAiCost(model, usage) {
+  const prices = findPriceTableEntry(model);
+  if (!prices || !usage) return '(unknown — model not in local price table; check the OpenAI dashboard for actual usage/cost)';
+  const inputCost = ((usage.prompt_tokens || 0) / 1_000_000) * prices.input;
+  const outputCost = ((usage.completion_tokens || 0) / 1_000_000) * prices.output;
+  return `~$${(inputCost + outputCost).toFixed(6)} (estimate, list price — not your actual invoice)`;
+}
+
+let openaiClientSingleton = null;
+/** Constructed lazily (not at module load) so importing this file never
+ * touches process.env.OPENAI_API_KEY unless AI_PROVIDER=openai is
+ * actually selected and a run is actually attempted. */
+function getOpenAiClient() {
+  if (!openaiClientSingleton) {
+    openaiClientSingleton = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: OPENAI_REQUEST_TIMEOUT_MS, maxRetries: 0 });
+  }
+  return openaiClientSingleton;
+}
+
+function openAiIsConfigured() {
+  return !!process.env.OPENAI_API_KEY && AI_MONTHLY_BUDGET_LIMIT > 0;
+}
+
 /**
- * Real providers are NOT implemented in this step — this project has no
- * network access to api.openai.com/api.anthropic.com in this
- * environment, and wiring in a real SDK before it can be genuinely
- * tested would just be more reviewed-but-unverified code (see
- * backend/README.md's honest note about stripeProvider.js for the same
- * situation with payments). Selecting "openai" or "anthropic" via
- * AI_PROVIDER is accepted (doesn't crash the backend), but isConfigured()
- * always returns false until a real implementation exists here — so
- * POST /admin/ai/run returns a clear PROVIDER_NOT_CONFIGURED error
- * instead of pretending to call a model that isn't actually wired up.
- *
- * For AI_PROVIDER=openai specifically, the error message below reports
- * exactly which of the two independent gates isn't satisfied yet
- * (OPENAI_API_KEY missing, and/or AI_MONTHLY_BUDGET_LIMIT still at its
- * default of 0) — both must be true before a real call would even be
- * attempted once this is actually implemented. Neither gate is
- * sufficient by itself: a real key with a zero budget is still refused,
- * and a positive budget with no key is still refused.
- *
- * If/when a real provider is added: it would call a plain fetch() to
- * the provider's chat-completions endpoint with prompt.system/prompt.user,
- * ask for JSON output (most providers support a "JSON mode"), parse the
- * response, and return { output, estimatedCost, model } in the same
- * shape as the mock provider above — orchestrator.js's output-shape
- * validation (see safety/aiGuards.js) applies identically either way,
- * so a real provider returning malformed JSON fails safely the same way
- * a broken mock would.
+ * Turns an OpenAI SDK error into a safe, specific, human-readable
+ * message. Only ever reads `.status`/`.code`/`.message` off the error —
+ * never anything that could carry the API key (the SDK's own errors
+ * don't include it either, but this stays narrow on purpose regardless).
+ */
+function describeOpenAiError(err) {
+  const status = err && err.status;
+  const code = err && (err.code || (err.error && err.error.code));
+  if (status === 401) return 'OpenAI rejected the API key (401 Unauthorized) — check that OPENAI_API_KEY in backend/.env is correct and active.';
+  if (code === 'insufficient_quota') return 'OpenAI reports insufficient quota/billing on this account (insufficient_quota) — check the OpenAI account\'s billing and usage limits.';
+  if (status === 429) return 'OpenAI rate-limited this request (429) — wait before trying again. This is not retried automatically.';
+  if (status === 400) return `OpenAI rejected the request as invalid (400): ${err.message || 'no further detail from OpenAI'}.`;
+  if (status === 404) return `OpenAI reports the model was not found (404) — check AI_MODEL/OPENAI_MODEL in backend/.env is a real, available model name.`;
+  if (err && (err.name === 'APIConnectionTimeoutError' || /timeout/i.test(String(err && err.message)))) {
+    return `OpenAI request timed out after ${OPENAI_REQUEST_TIMEOUT_MS}ms.`;
+  }
+  return `OpenAI request failed${status ? ` (HTTP ${status})` : ''}: ${err && err.message ? err.message : 'unknown error'}.`;
+}
+
+const openAiProvider = {
+  getProviderName() {
+    return 'openai';
+  },
+  isConfigured: openAiIsConfigured,
+  async runAgent({ agentName, prompt }) {
+    const model = OPENAI_MODEL || AI_MODEL || 'gpt-4.1-mini';
+    const client = getOpenAiClient();
+
+    let completion;
+    try {
+      completion = await client.chat.completions.create({
+        model,
+        temperature: AI_TEMPERATURE,
+        max_tokens: AI_MAX_OUTPUT_TOKENS,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: prompt.system },
+          { role: 'user', content: prompt.user }
+        ]
+      });
+    } catch (err) {
+      const wrapped = new Error(describeOpenAiError(err));
+      wrapped.code = 'PROVIDER_ERROR';
+      throw wrapped;
+    }
+
+    const rawContent = completion.choices && completion.choices[0] && completion.choices[0].message && completion.choices[0].message.content;
+    let output;
+    try {
+      output = JSON.parse(rawContent || '');
+    } catch {
+      const err = new Error(`OpenAI returned content that could not be parsed as JSON for agent "${agentName}".`);
+      err.code = 'INVALID_OUTPUT';
+      throw err;
+    }
+
+    return {
+      output,
+      estimatedCost: estimateOpenAiCost(completion.model || model, completion.usage),
+      model: completion.model || model
+    };
+  }
+};
+
+/**
+ * Fallback for any AI_PROVIDER value that isn't "mock" or "openai" (e.g.
+ * "anthropic", or a typo) — accepted without crashing the backend, but
+ * isConfigured() always returns false, so POST /admin/ai/run returns a
+ * clear PROVIDER_NOT_CONFIGURED error instead of pretending to call a
+ * model that isn't actually wired up here.
  */
 function unimplementedProvider(name) {
   return {
@@ -380,16 +599,7 @@ function unimplementedProvider(name) {
       return false;
     },
     async runAgent() {
-      let message = `AI_PROVIDER="${name}" is not implemented yet in this step — only "mock" runs real agent calls. See backend/README.md's "AI orchestrator foundation" section.`;
-      if (name === 'openai') {
-        const missing = [];
-        if (!process.env.OPENAI_API_KEY) missing.push('OPENAI_API_KEY is not set');
-        if (!(AI_MONTHLY_BUDGET_LIMIT > 0)) missing.push('AI_MONTHLY_BUDGET_LIMIT is 0 (or unset) — a positive monthly budget must be set deliberately before any real call is even considered');
-        if (missing.length > 0) {
-          message = `AI_PROVIDER="openai" readiness check failed: ${missing.join('; ')}. Also note: even once both are set, no real OpenAI call is implemented in this step yet — see backend/README.md's "GPT API readiness" section.`;
-        }
-      }
-      const err = new Error(message);
+      const err = new Error(`AI_PROVIDER="${name}" is not implemented — only "mock" and "openai" run real agent calls. See backend/README.md's "AI orchestrator foundation" / "GPT API readiness" sections.`);
       err.code = 'PROVIDER_NOT_CONFIGURED';
       throw err;
     }
@@ -398,7 +608,22 @@ function unimplementedProvider(name) {
 
 export function getAiProvider() {
   if (AI_PROVIDER_NAME === 'mock') return mockAiProvider;
+  if (AI_PROVIDER_NAME === 'openai') return openAiProvider;
   return unimplementedProvider(AI_PROVIDER_NAME);
+}
+
+/** Builds a specific "why isn't this configured" message for whichever
+ * provider is currently selected — used only by runWithProvider() below
+ * when isConfigured() already returned false, so this never duplicates
+ * or overrides the isConfigured() check itself, just explains it. */
+function describeNotConfigured(providerName) {
+  if (providerName === 'openai') {
+    const missing = [];
+    if (!process.env.OPENAI_API_KEY) missing.push('OPENAI_API_KEY is not set');
+    if (!(AI_MONTHLY_BUDGET_LIMIT > 0)) missing.push('AI_MONTHLY_BUDGET_LIMIT is 0 (or unset) — set a positive monthly budget deliberately before any real call is attempted');
+    return `AI_PROVIDER="openai" is not ready: ${missing.join('; ') || 'unknown reason'}. Both a real key and a positive budget are required.`;
+  }
+  return `AI provider "${providerName}" is not configured or not implemented yet — only "mock" and "openai" run real agent calls.`;
 }
 
 /** Thin wrapper orchestrator.js calls — exists so orchestrator.js doesn't
@@ -406,7 +631,7 @@ export function getAiProvider() {
 export async function runWithProvider({ agentName, prompt, input }) {
   const provider = getAiProvider();
   if (!provider.isConfigured()) {
-    const err = new Error(`AI provider "${provider.getProviderName()}" is not configured (missing AI_API_KEY, or provider not implemented yet).`);
+    const err = new Error(describeNotConfigured(provider.getProviderName()));
     err.code = 'PROVIDER_NOT_CONFIGURED';
     throw err;
   }

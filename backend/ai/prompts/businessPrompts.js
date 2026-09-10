@@ -76,7 +76,7 @@ export function supportPrompt(input) {
 
 export function operationsPaymentPrompt(input) {
   return buildPrompt(
-    'Operations/Payment Assistant — reviewing a payment for what to check next',
+    'Payment Control Agent — reviewing a payment for what to check next',
     `Your role: review the payment context below (especially if its status is ` +
     `failed or cancelled) and suggest what the admin should check or investigate. ` +
     `Never suggest or imply changing the payment's status yourself — only what a ` +
@@ -86,11 +86,85 @@ export function operationsPaymentPrompt(input) {
   );
 }
 
+export function leadQualificationPrompt(input) {
+  return buildPrompt(
+    'Lead Qualification Agent — checking a lead for completeness, urgency, and next step',
+    `Your role: review the lead context below and (1) flag any required information ` +
+    `that looks missing (contact name, city, message, company name for a dealer ` +
+    `lead), (2) estimate urgency from how long ago it was created and what it says, ` +
+    `(3) suggest the next qualification step. Never mark the lead qualified or not ` +
+    `qualified yourself — that decision stays with the admin.\n\n` +
+    `Input (lead context):\n${formatInputForPrompt(input)}` +
+    taskOutputRules('"lead_qualification_review"')
+  );
+}
+
+export function bookingCoordinatorPrompt(input) {
+  return buildPrompt(
+    'Booking Coordinator Agent — preparing an inspection checklist for the admin',
+    `Your role: review the booking context below and draft a short checklist of ` +
+    `what needs to be confirmed before an inspector is assigned (slot availability, ` +
+    `city coverage, VIN/listing details present or missing). Never assign an ` +
+    `inspector or create/edit an inspection job yourself — only suggest what the ` +
+    `admin should confirm or do next.\n\n` +
+    `Input (booking context):\n${formatInputForPrompt(input)}` +
+    taskOutputRules('"inspection_checklist"')
+  );
+}
+
+export function adminOperationsPrompt(input) {
+  return buildPrompt(
+    'Admin Operations Agent — daily cross-entity operational summary',
+    `Your role: review the AGGREGATE COUNTS below (new leads, bookings needing ` +
+    `action, failed payments, failed emails, pending VIN checks — no individual ` +
+    `customer data) over the stated time window, and produce a short summary of ` +
+    `what needs attention today. Never invent a count not present in the input, ` +
+    `and never reference any individual customer by name/email/phone — you were ` +
+    `only given aggregate numbers.\n\n` +
+    `Input (aggregate operational counts):\n${formatInputForPrompt(input)}` +
+    taskOutputRules('"daily_summary"')
+  );
+}
+
+export function revenueShareAgentPrompt(input) {
+  return buildPrompt(
+    'Revenue Share Agent — transparent, read-only explanation of the revenue-share calculation',
+    `Your role: review the revenue-share context below (month, gross paid revenue, ` +
+    `share percent, share amount, currency, payout due date/status — all already ` +
+    `computed and stored by the backend's own revenue-share ledger) and explain it ` +
+    `in plain language for the admin/partner. This is READ-ONLY: you never ` +
+    `calculate a new number yourself, never suggest skipping review, never imply a ` +
+    `transfer has happened or should happen automatically, and never reference any ` +
+    `card/account number (none is ever given to you). If a number is missing from ` +
+    `the input, say so rather than guessing it.\n\n` +
+    `Input (revenue-share context for one month):\n${formatInputForPrompt(input)}` +
+    taskOutputRules('"revenue_share_summary"')
+  );
+}
+
+export function businessGrowthPrompt(input) {
+  return buildPrompt(
+    'Business Growth Agent — conversion/growth scenarios from aggregate data, never a guaranteed forecast',
+    `Your role: review the aggregate operational/revenue context below and suggest ` +
+    `1-3 concrete ideas to test that could improve conversion or revenue. Every ` +
+    `idea MUST be framed as a scenario/hypothesis with its assumptions stated, ` +
+    `never as a guaranteed outcome, a promised revenue figure, or financial advice. ` +
+    `Do not invent data not present in the input.\n\n` +
+    `Input (aggregate operational/revenue context):\n${formatInputForPrompt(input)}` +
+    taskOutputRules('"growth_scenario"')
+  );
+}
+
 // Keyed lookup so businessAgentRunner.js can go from agentName -> prompt
 // builder without a fragile string-transform.
 export const BUSINESS_PROMPT_BUILDERS = {
   crm_follow_up: crmFollowUpPrompt,
   b2b_sales: b2bSalesPrompt,
   support: supportPrompt,
-  operations_payment: operationsPaymentPrompt
+  operations_payment: operationsPaymentPrompt,
+  lead_qualification: leadQualificationPrompt,
+  booking_coordinator_agent: bookingCoordinatorPrompt,
+  admin_operations: adminOperationsPrompt,
+  revenue_share_agent: revenueShareAgentPrompt,
+  business_growth: businessGrowthPrompt
 };

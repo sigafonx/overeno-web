@@ -145,9 +145,17 @@ DEV_MOCK_FALLBACK, backup SQLite, CORS, HTTPS за прокси, smoke-тест�
 - Задать `CORS_ORIGINS` в `backend/.env` (реальный домен фронтенда) —
   без этого API отвечает только localhost dev-портам, это безопасный
   fallback, а не рабочая конфигурация для реального домена.
-- Подключить `POST /vin/check` к реальному платному VIN data provider —
-  сейчас это подтверждённая demo-заглушка (`result.isDemoResult: true`),
-  архитектурно готовая к замене, но не реальные данные об автомобиле.
+- Публичный `POST /vin/check` остаётся подтверждённой demo-заглушкой
+  (`result.isDemoResult: true`) сознательно — реальный (возможно платный)
+  Vincario-провайдер теперь реализован и протестирован
+  (`backend/vin/vincarioProvider.js`), но вызывается **только** админом
+  вручную для уже оплаченного VIN check (`POST /admin/vin-checks/:id/run-provider`,
+  `VIN_PROVIDER=real`+`VIN_PROVIDER_ENABLED=true`+ключи из Vincario
+  dashboard) — и даже тогда отдаёт только технические характеристики
+  (марка/модель/год/двигатель), не историю ДТП/пробега. Подробности,
+  как включить и известные риски — `backend/README.md`, разделы
+  «Real VIN provider adapter» и «GPT API readiness» (там же — как
+  включить реальный OpenAI для AI-агентов, `AI_PROVIDER=openai`).
 - Настроить реальный SMTP (или сменить `backend/email/emailClient.js` на
   Resend/SendGrid/Mailgun) и включить `EMAIL_ENABLED=true` — сейчас по
   умолчанию email выключен и работал только против тестового SMTP.

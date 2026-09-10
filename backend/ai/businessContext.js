@@ -1,7 +1,99 @@
-import { findLeadById } from '../db/repositories/leadsRepository.js';
-import { findBookingById } from '../db/repositories/bookingsRepository.js';
-import { findVinCheckById } from '../db/repositories/vinChecksRepository.js';
-import { findPaymentById } from '../db/repositories/paymentsRepository.js';
+import { findLeadById, findAllLeads } from '../db/repositories/leadsRepository.js';
+import { findBookingById, findAllBookings } from '../db/repositories/bookingsRepository.js';
+import { findVinCheckById, findAllVinChecks } from '../db/repositories/vinChecksRepository.js';
+import { findPaymentById, findAllPayments } from '../db/repositories/paymentsRepository.js';
+import { findEmailLogById, findAllEmailLogs } from '../db/repositories/emailLogsRepository.js';
+import { getRevenueShareSettings } from '../db/repositories/revenueShareRepository.js';
+import { calculateMonthlyPayout, listAllMatchingLedgerEntries, listAllMatchingPayoutRecords } from '../revenueShare/revenueShareService.js';
+
+// How far back "recent" looks for the dashboard/admin-operations aggregate
+// below — deliberately a fixed constant, not configurable, since this is
+// a lightweight cross-entity summary, not a reporting tool.
+const DASHBOARD_WINDOW_DAYS = 7;
+
+function isWithinWindowDays(iso, days) {
+  if (!iso) return false;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return false;
+  return Date.now() - t <= days * 86400000;
+}
+
+const BOOKING_STATUSES_NEEDING_ACTION = ['new', 'contacted', 'waiting_payment', 'inspector_needed'];
+
+/**
+ * Aggregate-only cross-entity counts for the Admin Operations / Business
+ * Growth agents — deliberately NEVER includes an individual record's
+ * PII (name/email/phone/message) or even an id list, only counts over a
+ * fixed recent window. This is what makes it safe to hand to an AI
+ * provider (mock or real) without a privacy review beyond what already
+ * applies to aggregate statistics.
+ */
+function buildDashboardContext() {
+  const leads = findAllLeads();
+  const bookings = findAllBookings();
+  const payments = findAllPayments();
+  const emailLogs = findAllEmailLogs();
+  const vinChecks = findAllVinChecks();
+
+  return {
+    dashboard: {
+      windowDays: DASHBOARD_WINDOW_DAYS,
+      newLeadsCount: leads.filter((l) => isWithinWindowDays(l.createdAt, DASHBOARD_WINDOW_DAYS)).length,
+      bookingsNeedingActionCount: bookings.filter((b) => BOOKING_STATUSES_NEEDING_ACTION.includes(b.status)).length,
+      failedPaymentsCount: payments.filter((p) => p.status === 'failed' && isWithinWindowDays(p.createdAt, DASHBOARD_WINDOW_DAYS)).length,
+      cancelledPaymentsCount: payments.filter((p) => p.status === 'cancelled' && isWithinWindowDays(p.createdAt, DASHBOARD_WINDOW_DAYS)).length,
+      failedEmailsCount: emailLogs.filter((e) => e.status === 'failed' && isWithinWindowDays(e.createdAt, DASHBOARD_WINDOW_DAYS)).length,
+      pendingVinChecksCount: vinChecks.filter((v) => v.paymentStatus !== 'paid' && isWithinWindowDays(v.createdAt, DASHBOARD_WINDOW_DAYS)).length,
+      totalLeads: leads.length,
+      totalBookings: bookings.length,
+      totalPayments: payments.length
+    }
+  };
+}
+
+/**
+ * Read-only revenue-share summary for one calendar month (see
+ * backend/revenueShare/revenueShareService.js — this never calculates a
+ * NEW payout row, it only reads what's already there, or previews the
+ * live ledger total if no payout has been created for that month yet).
+ * Prefers an existing monthly_payouts row (already-persisted numbers +
+ * real payoutDueAt/status) over the live preview, since that's the more
+ * authoritative source once one exists.
+ */
+function buildRevenueShareSummary(monthKey) {
+  const settings = getRevenueShareSettings();
+  const ledgerEntries = listAllMatchingLedgerEntries({ monthKey });
+  const existingPayouts = listAllMatchingPayoutRecords({ monthKey });
+
+  if (existingPayouts.length > 0) {
+    const payout = existingPayouts[0];
+    return {
+      monthKey,
+      enabled: settings.enabled,
+      sharePercent: payout.sharePercent,
+      currency: payout.currency,
+      grossRevenue: payout.grossRevenue,
+      shareAmount: payout.shareAmount,
+      ledgerEntryCount: ledgerEntries.length,
+      payoutDueAt: payout.payoutDueAt,
+      payoutStatus: payout.status
+    };
+  }
+
+  const previews = calculateMonthlyPayout(monthKey);
+  const preview = previews[0] || null;
+  return {
+    monthKey,
+    enabled: settings.enabled,
+    sharePercent: settings.sharePercent,
+    currency: preview ? preview.currency : null,
+    grossRevenue: preview ? preview.grossRevenue : 0,
+    shareAmount: preview ? preview.shareAmount : 0,
+    ledgerEntryCount: ledgerEntries.length,
+    payoutDueAt: null,
+    payoutStatus: 'not_calculated_yet'
+  };
+}
 
 /**
  * Builds the context object passed as `input` to a wave-2 business
@@ -94,6 +186,46 @@ export function buildBusinessContext(entityType, entityId) {
         createdAt: payment.createdAt
       }
     };
+  }
+
+  // Email Support Agent extension — entityId is an email_logs row id.
+  // recipientEmail is deliberately excluded, same PII-minimization
+  // principle as every other branch above (the admin already has the
+  // real address on the entity itself if they decide to actually send
+  // something).
+  if (entityType === 'email_log') {
+    const emailLog = findEmailLogById(entityId);
+    if (!emailLog) return null;
+    return {
+      emailLog: {
+        entityType: emailLog.entityType,
+        entityId: emailLog.entityId,
+        recipientType: emailLog.recipientType,
+        subject: emailLog.subject || null,
+        status: emailLog.status,
+        errorMessage: emailLog.errorMessage || null,
+        createdAt: emailLog.createdAt,
+        reviewedAt: emailLog.reviewedAt || null,
+        resolvedAt: emailLog.resolvedAt || null
+      }
+    };
+  }
+
+  // Admin Operations Agent / Business Growth Agent — no single entity to
+  // fetch; entityId is just a free-form label (e.g. "today") the admin
+  // picks when running the agent. Always succeeds (never "not found")
+  // since this is a live aggregate, not a lookup.
+  if (entityType === 'dashboard') {
+    return buildDashboardContext();
+  }
+
+  // Revenue Share Agent — entityId is a "YYYY-MM" monthKey. Returns null
+  // (treated as a validation error by the caller) for anything that
+  // doesn't look like a real month key, rather than silently defaulting
+  // to some other month.
+  if (entityType === 'revenue_share') {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(entityId))) return null;
+    return { revenueShare: buildRevenueShareSummary(entityId) };
   }
 
   return null;

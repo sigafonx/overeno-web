@@ -34,10 +34,13 @@ import {
   listSections, getSection, updateSection, reorderSections, resetDefaultSections
 } from './db/repositories/reportSectionsRepository.js';
 import { sendReportReadyEmail } from './email/emailService.js';
-import { AI_ENABLED, AI_PROVIDER_NAME, AI_MONTHLY_BUDGET_LIMIT } from './ai/aiConfig.js';
+import { AI_ENABLED, AI_PROVIDER_NAME, AI_MONTHLY_BUDGET_LIMIT, OPENAI_MODEL } from './ai/aiConfig.js';
+import { getAiProvider } from './ai/aiClient.js';
+import { listAgentDefinitions } from './ai/agentRegistry.js';
 import { generateVinResult } from './vin/demoVinProvider.js';
-import { VIN_PROVIDER_NAME, VIN_REQUIRE_PAYMENT_FOR_REAL_CHECK } from './vin/vinConfig.js';
+import { VIN_PROVIDER_NAME, VIN_REQUIRE_PAYMENT_FOR_REAL_CHECK, VIN_PROVIDER_ENABLED, VINCARIO_LABEL, VINCARIO_BASE_URL } from './vin/vinConfig.js';
 import { getVinProvider } from './vin/vinProvider.js';
+import { getKeyPresence as getVincarioKeyPresence, runProviderDiagnostics as runVincarioDiagnostics } from './vin/vincarioProvider.js';
 import { runVinProviderCheck } from './vin/vinCostLogger.js';
 import { listVinProviderRunsForVinCheck } from './db/repositories/vinProviderRunsRepository.js';
 import { validateBusinessRunRequest, runBusinessAgent } from './ai/businessAgentRunner.js';
@@ -1875,8 +1878,15 @@ adminVinChecksRouter.post('/vin-checks/:id/run-provider', rateLimit('vin-run-pro
     if (err.code === 'PROVIDER_NOT_CONFIGURED') {
       return res.status(503).json({ ok: false, error: 'PROVIDER_NOT_CONFIGURED', message: err.message });
     }
-    if (err.code === 'PROVIDER_ERROR') {
-      return res.status(502).json({ ok: false, error: 'PROVIDER_ERROR', message: err.message });
+    if (err.code === 'invalidVin') {
+      return res.status(400).json({ ok: false, error: 'invalidVin', message: err.message });
+    }
+    // Vincario-specific classified errors (see backend/vin/vincarioProvider.js's
+    // classifyVincarioError()) — all provider-side (not our fault, not the
+    // client's fault), so 502 Bad Gateway for every one, distinguished only
+    // by `error` so the admin UI/curl caller can tell them apart.
+    if (['providerUnauthorized', 'providerChecksumInvalid', 'providerProductNotEnabled', 'providerPlanLimited', 'providerQuotaEmpty', 'providerEndpointUnavailable', 'providerNetworkError', 'PROVIDER_ERROR', 'providerError'].includes(err.code)) {
+      return res.status(502).json({ ok: false, error: err.code, message: err.message });
     }
     next(err);
   }
@@ -1897,6 +1907,60 @@ adminVinChecksRouter.get('/vin-checks/:id/provider-runs', async (req, res, next)
 });
 
 app.use('/admin', adminVinChecksRouter);
+
+// ---------------------------------------------------------------------------
+// GET /admin/vin/provider-health — safe diagnostic for "can the currently
+// configured Vincario trial/plan actually decode a VIN right now, without
+// buying a paid tier". Runs balance -> decode/info -> decode (fallback) and
+// returns a structured diagnosis. Never returns/logs the API key, secret,
+// control sum, or full request URL — only presence booleans and Vincario's
+// own (already-safe) error messages. Rate-limited: it makes real outbound
+// calls to api.vincario.com just like run-provider above.
+// ---------------------------------------------------------------------------
+const adminVinDiagnosticsRouter = express.Router();
+adminVinDiagnosticsRouter.use(requireAdmin);
+
+adminVinDiagnosticsRouter.get('/vin/provider-health', rateLimit('vin-provider-health'), async (req, res, next) => {
+  try {
+    const keyPresence = getVincarioKeyPresence();
+    const testVin = typeof req.query.vin === 'string' && req.query.vin.trim() ? req.query.vin.trim() : undefined;
+    const wantsDebug = req.query.debug === '1' || req.query.debug === 'true';
+    const diagnostics = await runVincarioDiagnostics({ vin: testVin, debug: wantsDebug });
+
+    const response = {
+      ok: true,
+      vinProviderEnabled: VIN_PROVIDER_ENABLED,
+      vinProviderMode: VIN_PROVIDER_NAME,
+      vinProviderName: VINCARIO_LABEL,
+      vinProviderBaseUrl: VINCARIO_BASE_URL,
+      // Length only, never the value — enough to spot an obviously wrong
+      // (empty/truncated/whitespace-padded) key or secret without ever
+      // revealing a single character of either.
+      apiKeyPresent: keyPresence.apiKeyPresent,
+      apiKeyLength: keyPresence.apiKeyLength,
+      secretKeyPresent: keyPresence.secretKeyPresent,
+      secretKeyLength: keyPresence.secretKeyLength,
+      urlConsistencyCheck: diagnostics.urlConsistencyCheck,
+      diagnostics: {
+        balance: diagnostics.balance,
+        decodeInfo: diagnostics.decodeInfo,
+        decodeInfoNoVersion: diagnostics.decodeInfoNoVersion,
+        decodeFallback: diagnostics.decodeFallback
+      },
+      diagnosis: diagnostics.diagnosis,
+      diagnosisMessage: diagnostics.diagnosisMessage
+    };
+    if (wantsDebug) {
+      response.debug = diagnostics.debugTrace || [];
+    }
+
+    res.json(response);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.use('/admin', adminVinDiagnosticsRouter);
 
 // ---------------------------------------------------------------------------
 // Admin: email logs — read-only visibility into what sendLeadEmails() /
@@ -2605,6 +2669,53 @@ app.use('/admin', adminReportsRouter);
 const adminAiRouter = express.Router();
 adminAiRouter.use(requireAdmin);
 
+// ---------------------------------------------------------------------------
+// GET /admin/ai/health — lets the admin UI (and a curious admin via curl)
+// see whether AI is enabled/configured WITHOUT ever exposing the actual
+// OPENAI_API_KEY. Only ever reports booleans/counts/model names — never a
+// secret value. Same "present: yes/no" pattern this whole project's env
+// handling follows (see aiConfig.js/vinConfig.js: keys are read, never
+// exported/logged/returned).
+// ---------------------------------------------------------------------------
+adminAiRouter.get('/ai/health', async (req, res, next) => {
+  try {
+    const provider = getAiProvider();
+    res.json({
+      ok: true,
+      aiEnabled: AI_ENABLED,
+      provider: AI_PROVIDER_NAME,
+      configured: provider.isConfigured(),
+      model: AI_PROVIDER_NAME === 'openai' ? OPENAI_MODEL : 'mock-model-v1',
+      openai: {
+        keyPresent: !!process.env.OPENAI_API_KEY,
+        monthlyBudgetLimit: AI_MONTHLY_BUDGET_LIMIT,
+        budgetConfigured: AI_MONTHLY_BUDGET_LIMIT > 0
+      },
+      vin: {
+        providerMode: VIN_PROVIDER_NAME,
+        vincarioEnabled: VIN_PROVIDER_ENABLED,
+        vincarioKeyPresent: !!process.env.VIN_PROVIDER_API_KEY,
+        vincarioSecretPresent: !!process.env.VIN_PROVIDER_SECRET_KEY
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /admin/ai/agents — the full agent catalog (report + business kinds),
+// including governance metadata (allowedActions/forbiddenActions/
+// riskLevel/systemPrompt/status) for admin-ai-runs.html's catalog panel.
+// Purely a read of the static registry (backend/ai/agentRegistry.js) —
+// never touches a provider, never costs anything.
+adminAiRouter.get('/ai/agents', async (req, res, next) => {
+  try {
+    res.json({ ok: true, items: listAgentDefinitions() });
+  } catch (err) {
+    next(err);
+  }
+});
+
 adminAiRouter.post('/ai/run', rateLimit('ai-run'), async (req, res, next) => {
   try {
     const problems = validateRunRequest(req.body);
@@ -2627,8 +2738,11 @@ adminAiRouter.post('/ai/run', rateLimit('ai-run'), async (req, res, next) => {
     if (err.code === 'PROVIDER_NOT_CONFIGURED') {
       return res.status(503).json({ ok: false, error: 'PROVIDER_NOT_CONFIGURED', message: err.message });
     }
-    if (err.code === 'VALIDATION_ERROR') {
-      return res.status(400).json({ ok: false, error: 'VALIDATION_ERROR', message: err.message });
+    if (err.code === 'PROVIDER_ERROR') {
+      return res.status(502).json({ ok: false, error: 'PROVIDER_ERROR', message: err.message });
+    }
+    if (err.code === 'VALIDATION_ERROR' || err.code === 'INVALID_OUTPUT') {
+      return res.status(400).json({ ok: false, error: err.code, message: err.message });
     }
     next(err);
   }
@@ -2771,6 +2885,9 @@ adminAiRouter.post('/agents/run-business-agent', rateLimit('ai-run'), async (req
     }
     if (err.code === 'PROVIDER_NOT_CONFIGURED') {
       return res.status(503).json({ ok: false, error: 'PROVIDER_NOT_CONFIGURED', message: err.message });
+    }
+    if (err.code === 'PROVIDER_ERROR') {
+      return res.status(502).json({ ok: false, error: 'PROVIDER_ERROR', message: err.message });
     }
     if (err.code === 'VALIDATION_ERROR' || err.code === 'INVALID_OUTPUT') {
       return res.status(400).json({ ok: false, error: err.code, message: err.message });
@@ -3729,6 +3846,7 @@ app.listen(PORT, () => {
   console.log(`  PATCH /admin/bookings/:id/assign   (x-admin-password required)`);
   console.log(`  PATCH /admin/vin-checks/:id/assign (x-admin-password required)`);
   console.log(`  POST  /admin/vin-checks/:id/run-provider    (x-admin-password required)`);
+  console.log(`  GET   /admin/vin/provider-health             (x-admin-password required)`);
   console.log(`  GET   /admin/vin-checks/:id/provider-runs   (x-admin-password required)`);
   console.log(`  GET   /admin/agents            (x-admin-password required)`);
   console.log(`  GET   /admin/agents/:id        (x-admin-password required)`);
@@ -3750,6 +3868,8 @@ app.listen(PORT, () => {
   console.log(`  DELETE /admin/reports/:id/public-token       (x-admin-password required)`);
   console.log(`  POST   /admin/reports/:id/send-to-customer   (x-admin-password required)`);
   console.log(`  GET    /reports/public/:token                (PUBLIC — no password)`);
+  console.log(`  GET    /admin/ai/health             (x-admin-password required)`);
+  console.log(`  GET    /admin/ai/agents             (x-admin-password required)`);
   console.log(`  POST   /admin/ai/run                (x-admin-password required)`);
   console.log(`  GET    /admin/ai/runs               (x-admin-password required)`);
   console.log(`  GET    /admin/ai/runs/export.csv    (x-admin-password required)`);
@@ -3822,16 +3942,22 @@ app.listen(PORT, () => {
   if (PAYMENTS_ENABLED && PAYMENT_PROVIDER_NAME === 'stripe' && !process.env.STRIPE_SECRET_KEY) {
     console.warn('WARNING: PAYMENT_PROVIDER=stripe but STRIPE_SECRET_KEY is not set — POST /payments/checkout will return an error until it is.');
   }
+  console.log(`OpenAI: key present: ${process.env.OPENAI_API_KEY ? 'yes' : 'no'}, model: ${OPENAI_MODEL}, monthly budget limit: ${AI_MONTHLY_BUDGET_LIMIT > 0 ? `$${AI_MONTHLY_BUDGET_LIMIT}` : 'not set (0)'}`);
+  console.log(`Vincario VIN provider: enabled: ${VIN_PROVIDER_ENABLED ? 'yes' : 'no'}, key present: ${process.env.VIN_PROVIDER_API_KEY ? 'yes' : 'no'}, secret present: ${process.env.VIN_PROVIDER_SECRET_KEY ? 'yes' : 'no'}`);
   if (AI_ENABLED && AI_PROVIDER_NAME === 'openai' && (!process.env.OPENAI_API_KEY || !(AI_MONTHLY_BUDGET_LIMIT > 0))) {
     const missing = [];
     if (!process.env.OPENAI_API_KEY) missing.push('OPENAI_API_KEY');
     if (!(AI_MONTHLY_BUDGET_LIMIT > 0)) missing.push('AI_MONTHLY_BUDGET_LIMIT (currently 0 or unset)');
-    console.warn(`WARNING: AI_PROVIDER=openai but ${missing.join(' and ')} not set — POST /admin/ai/run will return PROVIDER_NOT_CONFIGURED until both are. Also note: no real OpenAI call is implemented in this step regardless — only "mock" runs real agent calls. See backend/README.md's "GPT API readiness" section.`);
+    console.warn(`WARNING: AI_PROVIDER=openai but ${missing.join(' and ')} not set — POST /admin/ai/run and /admin/agents/run-business-agent will return PROVIDER_NOT_CONFIGURED until both are set. See backend/README.md's "GPT API readiness" section.`);
   } else if (AI_ENABLED && AI_PROVIDER_NAME !== 'mock' && AI_PROVIDER_NAME !== 'openai' && !process.env.AI_API_KEY) {
-    console.warn(`WARNING: AI_PROVIDER=${AI_PROVIDER_NAME} but AI_API_KEY is not set — POST /admin/ai/run will return PROVIDER_NOT_CONFIGURED until it is (and note: "${AI_PROVIDER_NAME}" isn't actually implemented yet in this step regardless — only "mock" runs real agent calls).`);
+    console.warn(`WARNING: AI_PROVIDER=${AI_PROVIDER_NAME} but AI_API_KEY is not set — POST /admin/ai/run will return PROVIDER_NOT_CONFIGURED until it is (and note: "${AI_PROVIDER_NAME}" isn't implemented — only "mock" and "openai" run real agent calls).`);
   }
-  if (VIN_PROVIDER_NAME === 'real' && !(process.env.VIN_API_BASE_URL && process.env.VIN_API_KEY)) {
-    console.warn('WARNING: VIN_PROVIDER=real but VIN_API_BASE_URL and/or VIN_API_KEY is not set — POST /admin/vin-checks/:id/run-provider will return PROVIDER_NOT_CONFIGURED until both are set. Also see backend/README.md for the ToS/legal note before picking a real provider.');
+  if (VIN_PROVIDER_NAME === 'real') {
+    const vincarioReady = VIN_PROVIDER_ENABLED && process.env.VIN_PROVIDER_API_KEY && process.env.VIN_PROVIDER_SECRET_KEY;
+    const legacyReady = process.env.VIN_API_BASE_URL && process.env.VIN_API_KEY;
+    if (!vincarioReady && !legacyReady) {
+      console.warn('WARNING: VIN_PROVIDER=real but neither the Vincario adapter (VIN_PROVIDER_ENABLED + VIN_PROVIDER_API_KEY + VIN_PROVIDER_SECRET_KEY) nor the generic adapter (VIN_API_BASE_URL + VIN_API_KEY) is fully configured — POST /admin/vin-checks/:id/run-provider will return PROVIDER_NOT_CONFIGURED until one is. See backend/README.md\'s "Real VIN provider adapter" section.');
+    }
   }
   if (isEmailEnabled() && !process.env.SMTP_HOST) {
     console.warn('WARNING: EMAIL_ENABLED=true but SMTP_HOST is not set — every email attempt will be logged as failed until SMTP is configured.');

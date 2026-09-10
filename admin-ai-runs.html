@@ -43,11 +43,40 @@
 
 <main class="admin-main">
   <div class="demo-warning">
-    Základ AI orchestrátoru — zatím jen 5 registrovaných agentů, všechny
-    přes <code>AI_PROVIDER=mock</code> (deterministický, offline výstup,
-    žádné reálné volání modelu, žádné náklady). Každý běh <strong>vždy</strong>
+    AI orchestrátor — 14 registrovaných agentů (5 report + 9 business),
+    přes <code>AI_PROVIDER=mock</code> (deterministický, offline, zdarma)
+    nebo <code>AI_PROVIDER=openai</code> (skutečné volání OpenAI API, jen
+    když je nastaven <code>OPENAI_API_KEY</code> a kladný
+    <code>AI_MONTHLY_BUDGET_LIMIT</code>). Každý běh <strong>vždy</strong>
     vyžaduje ruční schválení admina — nic z výstupu se nikde automaticky
     nepoužije ani neposílá zákazníkovi, dokud ho někdo ručně neschválí.
+    API klíč se tu nikdy nezobrazuje, jen „present: yes/no".
+  </div>
+
+  <!-- AI Health -->
+  <div class="admin-table-wrap" style="padding:16px 18px;margin-bottom:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+      <h3 style="margin:0;font-size:1rem;">AI health</h3>
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="healthRefreshBtn">Zkontrolovat</button>
+    </div>
+    <dl class="detail-fields" id="healthFields" style="margin-top:10px;"></dl>
+    <p class="form-status" id="healthMsg"></p>
+  </div>
+
+  <!-- AI Agents Catalog -->
+  <div class="admin-table-wrap" style="padding:16px 18px;margin-bottom:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+      <h3 style="margin:0;font-size:1rem;">Katalog agentů</h3>
+      <button type="button" class="btn btn-ghost on-paper btn-sm" id="catalogRefreshBtn">Načíst katalog</button>
+    </div>
+    <div class="admin-table-wrap" style="margin-top:10px;">
+      <table class="admin-table">
+        <thead>
+          <tr><th>Agent</th><th>Role</th><th>Kind</th><th>Entity types</th><th>Risk</th><th>Stav</th><th></th></tr>
+        </thead>
+        <tbody id="catalogTbody"></tbody>
+      </table>
+    </div>
   </div>
 
   <div class="admin-toolbar">
@@ -135,6 +164,36 @@
     <p class="form-status" id="detailReviewMsg"></p>
 
     <button type="button" class="btn btn-ghost on-paper btn-block" id="detailCloseBtn2" style="margin-top:18px;">Zavřít</button>
+  </div>
+</div>
+
+<!-- Agent catalog detail / test run -->
+<div class="modal-overlay" id="catalogDetailOverlay">
+  <div class="modal-box" style="max-width:640px;">
+    <button class="modal-close" id="catalogDetailClose" aria-label="Zavřít">&times;</button>
+    <h3 id="catalogDetailTitle">Detail agenta</h3>
+    <dl class="detail-fields" id="catalogDetailFields"></dl>
+
+    <h4 style="margin:16px 0 6px;font-size:0.95rem;">Smí</h4>
+    <ul id="catalogDetailAllowed" style="margin:0 0 10px 18px;padding:0;font-size:0.85rem;"></ul>
+    <h4 style="margin:16px 0 6px;font-size:0.95rem;">Nesmí</h4>
+    <ul id="catalogDetailForbidden" style="margin:0 0 10px 18px;padding:0;font-size:0.85rem;"></ul>
+
+    <h4 style="margin:16px 0 6px;font-size:0.95rem;">Testovací spuštění</h4>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+      <div class="modal-field" style="margin-bottom:0;min-width:160px;">
+        <label for="catalogRunEntityType">Typ entity</label>
+        <select id="catalogRunEntityType"></select>
+      </div>
+      <div class="modal-field" style="margin-bottom:0;min-width:200px;">
+        <label for="catalogRunEntityId">ID entity</label>
+        <input type="text" id="catalogRunEntityId" placeholder="lead_xxxxxxxxxxxx / today / 2026-09">
+      </div>
+      <button type="button" class="btn btn-brass" id="catalogRunBtn">Run test</button>
+    </div>
+    <p class="form-status" id="catalogRunMsg"></p>
+
+    <button type="button" class="btn btn-ghost on-paper btn-block" id="catalogDetailCloseBtn2" style="margin-top:18px;">Zavřít</button>
   </div>
 </div>
 

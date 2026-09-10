@@ -78,13 +78,18 @@ export const AGENT_OUTPUT_SCHEMAS = {
   report_writer: ['sections', 'summary', 'verdict'],
   buyer_advisor: ['recommendation', 'nextSteps', 'negotiationPoints', 'questionsForSeller'],
   vin_risk_explanation: ['vinSummary', 'riskExplanation', 'limitations'],
-  // Wave 2 business agents all share the same output shape — a list of
+  // Wave 2/3 business agents all share the same output shape — a list of
   // suggested tasks (see businessAgentRunner.js, which turns each item
   // in `tasks` into its own agent_tasks row).
   crm_follow_up: ['tasks'],
   b2b_sales: ['tasks'],
   support: ['tasks'],
-  operations_payment: ['tasks']
+  operations_payment: ['tasks'],
+  lead_qualification: ['tasks'],
+  booking_coordinator_agent: ['tasks'],
+  admin_operations: ['tasks'],
+  revenue_share_agent: ['tasks'],
+  business_growth: ['tasks']
 };
 
 /**

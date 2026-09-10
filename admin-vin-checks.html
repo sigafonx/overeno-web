@@ -44,9 +44,12 @@
 <main class="admin-main">
   <div class="demo-warning">
     <span class="demo-badge">Demo</span>
-    Všechny výsledky na této stránce jsou deterministické demo-výsledky
-    generované ze samotného VIN kódu — nejde o oficiální prověření
-    historie vozidla. Reálná VIN-integrace bude samostatný krok.
+    Veřejný formulář (POST /vin/check) vždy vrací deterministický
+    demo-výsledek generovaný ze samotného VIN kódu — nejde o oficiální
+    prověření historie vozidla. Admin může navíc u zaplaceného VIN checku
+    ručně spustit reálný Vincario provider tlačítkem „Run VIN provider"
+    níže (jen technické specifikace vozidla, ne historii nehod/najeto km —
+    viz backend/README.md).
   </div>
 
   <div class="admin-toolbar">

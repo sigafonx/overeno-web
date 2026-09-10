@@ -52,6 +52,22 @@ function adminReviewAiRun(id, payload, password) {
   return adminRequest(`/admin/ai/runs/${encodeURIComponent(id)}/review`, { method: 'PATCH', password, body: payload });
 }
 
+function adminFetchAiHealth(password) {
+  return adminRequest('/admin/ai/health', { password });
+}
+
+function adminFetchAgentCatalog(password) {
+  return adminRequest('/admin/ai/agents', { password });
+}
+
+function adminRunAiAgent(agentName, entityType, entityId, password) {
+  return adminRequest('/admin/ai/run', { method: 'POST', password, body: { agentName, entityType, entityId } });
+}
+
+function adminRunBusinessAgentFromCatalog(agentName, entityType, entityId, password) {
+  return adminRequest('/admin/agents/run-business-agent', { method: 'POST', password, body: { agentName, entityType, entityId } });
+}
+
 function adminExportAiRunsCsv(params, password) {
   const qs = new URLSearchParams();
   for (const [key, value] of Object.entries(params || {})) {
@@ -86,6 +102,8 @@ const els = {};
 let currentRuns = [];
 let activeRunId = null;
 let searchDebounceTimer = null;
+let currentCatalog = [];
+let activeCatalogAgentName = null;
 
 function $(id) {
   return document.getElementById(id);
@@ -144,6 +162,159 @@ const DETAIL_FIELD_LABELS = {
   approvedAt: 'Schváleno',
   rejectedAt: 'Zamítnuto'
 };
+
+// ---------------------------------------------------------------------------
+// AI Health panel
+// ---------------------------------------------------------------------------
+
+async function loadHealth() {
+  const password = getPassword();
+  if (!password) {
+    els.healthMsg.textContent = 'Zadejte admin heslo.';
+    els.healthMsg.classList.add('error');
+    return;
+  }
+
+  els.healthMsg.textContent = 'Načítám…';
+  els.healthMsg.classList.remove('error');
+
+  try {
+    const res = await adminFetchAiHealth(password);
+    const rows = {
+      'AI enabled': res.aiEnabled ? 'yes' : 'no',
+      'Provider': res.provider,
+      'Configured (ready to run)': res.configured ? 'yes' : 'no',
+      'Model': res.model,
+      'OpenAI key present': res.openai.keyPresent ? 'yes' : 'no',
+      'OpenAI monthly budget limit': res.openai.budgetConfigured ? `$${res.openai.monthlyBudgetLimit}` : 'not set (0)',
+      'VIN provider mode': res.vin.providerMode,
+      'Vincario enabled': res.vin.vincarioEnabled ? 'yes' : 'no',
+      'Vincario key present': res.vin.vincarioKeyPresent ? 'yes' : 'no',
+      'Vincario secret present': res.vin.vincarioSecretPresent ? 'yes' : 'no'
+    };
+    els.healthFields.innerHTML = Object.entries(rows)
+      .map(([label, value]) => `<div><span class="k">${escapeHtml(label)}</span><span class="v">${escapeHtml(value)}</span></div>`)
+      .join('');
+    els.healthMsg.textContent = '';
+  } catch (err) {
+    els.healthFields.innerHTML = '';
+    els.healthMsg.textContent = err.status === 401 ? 'Neplatné admin heslo.' : `Nepodařilo se načíst AI health: ${err.message}`;
+    els.healthMsg.classList.add('error');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Agent catalog panel
+// ---------------------------------------------------------------------------
+
+async function loadCatalog() {
+  const password = getPassword();
+  if (!password) {
+    els.catalogTbody.innerHTML = '<tr><td colspan="7">Zadejte admin heslo a klikněte na „Načíst katalog".</td></tr>';
+    return;
+  }
+
+  try {
+    const res = await adminFetchAgentCatalog(password);
+    currentCatalog = res.items || [];
+    renderCatalogTable(currentCatalog);
+  } catch (err) {
+    els.catalogTbody.innerHTML = `<tr><td colspan="7" style="color:var(--brick);">Nepodařilo se načíst katalog: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+function renderCatalogTable(items) {
+  els.catalogTbody.innerHTML = items.map((a) => `
+    <tr>
+      <td><span class="type-badge">${escapeHtml(a.name)}</span></td>
+      <td>${escapeHtml(a.label)}</td>
+      <td>${escapeHtml(a.kind)}</td>
+      <td>${escapeHtml((a.entityTypes || []).join(', '))}</td>
+      <td>${escapeHtml(a.riskLevel)}</td>
+      <td>${a.status === 'active' ? '<span class="status-badge status-paid">active</span>' : '<span class="status-badge status-cancelled">inactive</span>'}</td>
+      <td class="admin-col-actions"><button type="button" class="btn btn-ghost on-paper btn-sm" data-agent="${escapeHtml(a.name)}">Detail</button></td>
+    </tr>
+  `).join('');
+
+  els.catalogTbody.querySelectorAll('button[data-agent]').forEach((btn) => {
+    btn.addEventListener('click', () => openCatalogDetail(btn.getAttribute('data-agent')));
+  });
+}
+
+function openCatalogDetail(agentName) {
+  const agent = currentCatalog.find((a) => a.name === agentName);
+  if (!agent) return;
+
+  activeCatalogAgentName = agentName;
+  els.catalogDetailTitle.textContent = agent.label;
+  els.catalogRunMsg.textContent = '';
+  els.catalogRunMsg.classList.remove('error');
+
+  els.catalogDetailFields.innerHTML = [
+    ['Name (id)', agent.name],
+    ['Kind', agent.kind],
+    ['Risk level', agent.riskLevel],
+    ['Status', agent.status],
+    ['Description', agent.description],
+    ['System prompt (summary)', agent.systemPrompt],
+    ['Input types', (agent.inputTypes || []).join(', ')],
+    ['Output format', agent.outputFormat]
+  ].map(([label, value]) => `<div><span class="k">${escapeHtml(label)}</span><span class="v">${escapeHtml(value)}</span></div>`).join('');
+
+  els.catalogDetailAllowed.innerHTML = (agent.allowedActions || []).map((a) => `<li>${escapeHtml(a)}</li>`).join('');
+  els.catalogDetailForbidden.innerHTML = (agent.forbiddenActions || []).map((a) => `<li>${escapeHtml(a)}</li>`).join('');
+
+  els.catalogRunEntityType.innerHTML = (agent.entityTypes || []).map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+  els.catalogRunEntityId.value = '';
+
+  els.catalogDetailOverlay.classList.add('open');
+}
+
+function closeCatalogDetail() {
+  els.catalogDetailOverlay.classList.remove('open');
+  activeCatalogAgentName = null;
+}
+
+async function runCatalogTest() {
+  if (!activeCatalogAgentName) return;
+  const agent = currentCatalog.find((a) => a.name === activeCatalogAgentName);
+  if (!agent) return;
+
+  const password = getPassword();
+  if (!password) {
+    els.catalogRunMsg.textContent = 'Zadejte admin heslo.';
+    els.catalogRunMsg.classList.add('error');
+    return;
+  }
+
+  const entityType = els.catalogRunEntityType.value;
+  const entityId = els.catalogRunEntityId.value.trim();
+  if (!entityId) {
+    els.catalogRunMsg.textContent = 'Zadejte ID entity.';
+    els.catalogRunMsg.classList.add('error');
+    return;
+  }
+
+  els.catalogRunBtn.disabled = true;
+  els.catalogRunMsg.textContent = 'Spouštím…';
+  els.catalogRunMsg.classList.remove('error');
+
+  try {
+    if (agent.kind === 'report') {
+      await adminRunAiAgent(agent.name, entityType, entityId, password);
+      els.catalogRunMsg.textContent = 'Hotovo — výsledek uvidíte v tabulce AI runs níže po kliknutí na Obnovit.';
+      await loadRuns();
+    } else {
+      const res = await adminRunBusinessAgentFromCatalog(agent.name, entityType, entityId, password);
+      els.catalogRunMsg.textContent = `Vytvořeno ${res.tasks.length} task(ů) — viz admin-agent-tasks.html.`;
+    }
+  } catch (err) {
+    els.catalogRunMsg.textContent = `Nepodařilo se spustit: ${err.message}`;
+    els.catalogRunMsg.classList.add('error');
+  } finally {
+    els.catalogRunBtn.disabled = false;
+  }
+}
 
 async function loadRuns() {
   const password = getPassword();
@@ -361,6 +532,24 @@ function init() {
   els.detailRejectBtn = $('detailRejectBtn');
   els.detailReviewMsg = $('detailReviewMsg');
 
+  els.healthRefreshBtn = $('healthRefreshBtn');
+  els.healthFields = $('healthFields');
+  els.healthMsg = $('healthMsg');
+
+  els.catalogRefreshBtn = $('catalogRefreshBtn');
+  els.catalogTbody = $('catalogTbody');
+  els.catalogDetailOverlay = $('catalogDetailOverlay');
+  els.catalogDetailClose = $('catalogDetailClose');
+  els.catalogDetailCloseBtn2 = $('catalogDetailCloseBtn2');
+  els.catalogDetailTitle = $('catalogDetailTitle');
+  els.catalogDetailFields = $('catalogDetailFields');
+  els.catalogDetailAllowed = $('catalogDetailAllowed');
+  els.catalogDetailForbidden = $('catalogDetailForbidden');
+  els.catalogRunEntityType = $('catalogRunEntityType');
+  els.catalogRunEntityId = $('catalogRunEntityId');
+  els.catalogRunBtn = $('catalogRunBtn');
+  els.catalogRunMsg = $('catalogRunMsg');
+
   const savedPassword = sessionStorage.getItem(SESSION_KEY);
   if (savedPassword) {
     els.passwordInput.value = savedPassword;
@@ -402,12 +591,25 @@ function init() {
   els.detailOverlay.addEventListener('click', (e) => {
     if (e.target === els.detailOverlay) closeDetail();
   });
+
+  els.healthRefreshBtn.addEventListener('click', loadHealth);
+  els.catalogRefreshBtn.addEventListener('click', loadCatalog);
+  els.catalogDetailClose.addEventListener('click', closeCatalogDetail);
+  els.catalogDetailCloseBtn2.addEventListener('click', closeCatalogDetail);
+  els.catalogRunBtn.addEventListener('click', runCatalogTest);
+  els.catalogDetailOverlay.addEventListener('click', (e) => {
+    if (e.target === els.catalogDetailOverlay) closeCatalogDetail();
+  });
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && els.detailOverlay.classList.contains('open')) closeDetail();
+    if (e.key === 'Escape' && els.catalogDetailOverlay.classList.contains('open')) closeCatalogDetail();
   });
 
   if (savedPassword) {
     loadRuns();
+    loadHealth();
+    loadCatalog();
   }
 }
 

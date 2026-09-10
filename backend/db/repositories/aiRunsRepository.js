@@ -17,7 +17,7 @@ const selectByIdStmt = db.prepare('SELECT * FROM ai_agent_runs WHERE id = ?');
 const updateResultStmt = db.prepare(`
   UPDATE ai_agent_runs
   SET status = @status, outputJson = @outputJson, errorMessage = @errorMessage,
-      estimatedCost = @estimatedCost, updatedAt = @updatedAt
+      estimatedCost = @estimatedCost, model = @model, updatedAt = @updatedAt
   WHERE id = @id
 `);
 const updateReviewStmt = db.prepare(`
@@ -56,8 +56,15 @@ export function insertAiRun(data) {
 }
 
 /** Transitions a run to its final state — 'completed' with outputJson/
- * estimatedCost, or 'failed' with errorMessage. Returns the updated row,
- * or null if no run has that id. */
+ * estimatedCost/model, or 'failed' with errorMessage. `model` is
+ * deliberately re-settable here (not just at insertAiRun() time): the
+ * insert-time value only reflects the generic AI_MODEL env var, which is
+ * often empty (e.g. AI_PROVIDER=openai uses its own OPENAI_MODEL
+ * instead) — the provider's own actual reported model (see
+ * aiClient.js's runWithProvider()) is the more accurate value once a run
+ * completes, so this updates it in place rather than trusting the
+ * insert-time guess. Returns the updated row, or null if no run has that
+ * id. */
 export function updateAiRunResult(id, patch) {
   const existing = getAiRunById(id);
   if (!existing) return null;
@@ -68,6 +75,7 @@ export function updateAiRunResult(id, patch) {
     outputJson: patch.outputJson !== undefined ? patch.outputJson : existing.outputJson,
     errorMessage: patch.errorMessage !== undefined ? patch.errorMessage : existing.errorMessage,
     estimatedCost: patch.estimatedCost !== undefined ? patch.estimatedCost : existing.estimatedCost,
+    model: patch.model !== undefined ? patch.model : existing.model,
     updatedAt: new Date().toISOString()
   };
   updateResultStmt.run(merged);

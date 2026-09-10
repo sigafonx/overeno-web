@@ -17,6 +17,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "nodemailer": "^6.9.14",
+    "openai": "^4.68.0",
     "stripe": "^16.8.0"
   },
   "keywords": [],
